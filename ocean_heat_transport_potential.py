@@ -117,3 +117,85 @@ def plot_vector_field(lats, lons, field, u, v):  # , cmap, vmin, vmax):
 
     plt.show()
     plt.close(fig)
+
+
+def solve_for_ocean_heat_transport_potential_spherical():
+    # Load net upward heat flux dataset.
+    nuhf_filepath = os.path.join(data_dir_path, 'net_upward_heatflux.nc')
+    logger.info('Loading dataset: {}'.format(nuhf_filepath))
+    nuhf_dataset = netCDF4.Dataset(nuhf_filepath)
+
+    lats_nuhf = np.array(nuhf_dataset.variables['Y'])  # TODO: But this includes 90 N and 90 S!
+    lons_nuhf = np.array(nuhf_dataset.variables['X'])
+    net_upward_heat_flux = np.array(nuhf_dataset.variables['asum'])
+    net_upward_heat_flux, lons_nuhf = cartopy.util.add_cyclic_point(net_upward_heat_flux, coord=lons_nuhf)
+
+    # Load land sea mask (land=0, sea=1)
+    lsmask_filepath = os.path.join(data_dir_path, 'lsmask.oisst.v2.nc')
+    logger.info('Loading dataset: {}'.format(lsmask_filepath))
+    lsmask_dataset = netCDF4.Dataset(lsmask_filepath)
+
+    lats_lsmask = np.array(lsmask_dataset.variables['lat'])
+    lons_lsmask = np.array(lsmask_dataset.variables['lon'])
+    land_sea_mask = np.array(lsmask_dataset.variables['lsmask'])[0]
+
+    # plot_scalar_field(lats_nuhf, lons_nuhf, net_upward_heat_flux, 'BrBG', -200, 200)
+    # plot_scalar_field(lats_lsmask, lons_lsmask, land_sea_mask, 'RdBu', 0, 1)
+
+    # Setting up the linear system A*chi = f for the discretized Poisson equation with Dirchlet boundary conditions on
+    # a sphere.
+    lats, lons = np.deg2rad(lats_nuhf), np.deg2rad(lons_nuhf)
+    m, n = lats.size, lons.size
+    delta_phi, delta_lambda = np.pi/m, 2*np.pi/n
+
+    beta = 4 / (n * delta_phi**2)
+
+    logger.info('m = {:d}, n = {:d}, delta_phi = {:f}, delta_lambda = {:f}'.format(m, n, delta_phi, delta_lambda))
+
+    A = sparse.lil_matrix((m*n+2, m*n+2))
+    chi = sparse.lil_matrix((m*n+2, 1))
+    f = sparse.lil_matrix((m*n+2, 1))
+
+    # Applying Dirchlet boundary condition that chi=0 over land.
+    for i in np.arange(0, n):
+        lat = lats_nuhf[i]
+        for j in np.arange(0, m):
+            lon = lons_nuhf[j]
+            if is_land(lat, lon):
+                chi[i*n + j*m] = 0
+
+    # North pole condition
+    A[0, 0] = -beta*n
+    for j in np.arange(1, n+1):
+        A[0, j*m] = beta
+
+    f[0] = np.mean(net_upward_heat_flux[0, :])  # Use average value at 90 N to get f_N.
+
+    # South pole condition
+    A[m*n+1, m*n+1] = -beta*n
+    for j in np.arange(0, n):
+        A[m*n+1, j*m] = beta
+
+    f[m*n+1] = np.mean(net_upward_heat_flux[-1, :])  # Use average value at 90 S to get f_S.
+
+    # Interior points
+    for i in np.arange(0, n):
+        phi_i = i * delta_phi
+        phi_imh = (i - 0.5) * delta_phi
+        phi_iph = (i + 0.5) * delta_phi
+
+        a_i = np.sin(phi_imh) / (delta_phi**2 * np.sin(phi_i))
+        b_i = np.sin(phi_iph) / (delta_phi**2 * np.sin(phi_i))
+        d_i = 1 / (delta_lambda**2 * np.sin(phi_i)**2)
+
+        for j in np.arange(1, m+1):
+            A[i*n + j*m, i*n + j*m - 1] = a_i               # Coefficient of chi(i-1,j)
+            A[i*n + j*m, i*n + j*m + 1] = b_i               # Coefficient of chi(i+1,j)
+            A[i*n + j*m, i*n + j*m - m] = d_i               # Coefficient of chi(i,j-1)
+            A[i*n + j*m, i*n + j*m + m] = d_i               # Coefficient of chi(i,j+1)
+            A[i*n + j*m, i*n + j*m] = -(a_i + b_i + 2*d_i)  # Coefficient of chi(i,j)
+
+            # Construct the RHS vector source term
+            f[i*n + j*m] = net_upward_heat_flux[i, j]
+
+    # 4. Use conjugate gradient iterative method from SciPy to solve this system.
