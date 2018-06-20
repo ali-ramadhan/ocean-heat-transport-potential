@@ -199,3 +199,219 @@ def solve_for_ocean_heat_transport_potential_spherical():
             f[i*n + j*m] = net_upward_heat_flux[i, j]
 
     # 4. Use conjugate gradient iterative method from SciPy to solve this system.
+
+
+def solve_for_ocean_heat_transport_potential_cartesian():
+    # Load net upward heat flux dataset.
+    nuhf_filepath = os.path.join(data_dir_path, 'net_upward_heatflux.nc')
+    logger.info('Loading dataset: {}'.format(nuhf_filepath))
+    nuhf_dataset = netCDF4.Dataset(nuhf_filepath)
+
+    lats_nuhf = np.array(nuhf_dataset.variables['Y'])
+    lons_nuhf = np.array(nuhf_dataset.variables['X'])
+    net_upward_heat_flux = np.array(nuhf_dataset.variables['asum'])
+
+    # Load land sea mask (land=0, sea=1)
+    lsmask_filepath = os.path.join(data_dir_path, 'lsmask.oisst.v2.nc')
+    logger.info('Loading dataset: {}'.format(lsmask_filepath))
+    lsmask_dataset = netCDF4.Dataset(lsmask_filepath)
+
+    lats_lsmask = np.array(lsmask_dataset.variables['lat'])
+    lons_lsmask = np.array(lsmask_dataset.variables['lon'])
+    land_sea_mask = np.array(lsmask_dataset.variables['lsmask'])[0]
+
+    # Normalize array to integrate to zero, to satisfy the compatibility condition.
+    net_upward_heat_flux = net_upward_heat_flux - np.mean(net_upward_heat_flux)
+
+    # Setting up the linear system A*u = f for the discretized Poisson equation.
+    m, n = lons_nuhf.size, lats_nuhf.size
+
+    # A = sparse.lil_matrix((m*n, m*n))
+    A = np.zeros((m * n, m * n))
+    f = np.zeros((m * n, 1))
+
+    # Using the 90S and 90N rows as ghost points.
+    # lats_nuhf = lats_nuhf[1:-1]
+
+    logger.info('net_upward_heat_flux.shape={}'.format(net_upward_heat_flux.shape))
+    logger.info('f.shape={}'.format(f.shape))
+    logger.info('m={:d}, n={:d}'.format(m, n))
+
+    for j in np.arange(1, n - 1):
+        for i in np.arange(m):
+            # Taking modulus of i-1 and i+1 to get the correct index in the special cases of
+            #  * i=0 (180 W) and need to use the value from i=m (180 E)
+            #  * i=m (180 E) and need to use the value from i=0 (180 W)
+            im1 = (i - 1) % m
+            ip1 = (i + 1) % m
+
+            dx_j = distance(lats_nuhf[j], lons_nuhf[0], lats_nuhf[j + 1], lons_nuhf[0])
+            dy = distance(lats_nuhf[j], lons_nuhf[0], lats_nuhf[j], lons_nuhf[1])
+
+            A[j * m + i, j * m + i - 1] = 1 / dx_j ** 2  # Coefficient of u(i-1,j)
+            A[j * m + i, j * m + i + 1] = 1 / dx_j ** 2  # Coefficient of u(i+1,j)
+            A[j * m + i, j * m + i - m] = 1 / dy ** 2  # Coefficient of u(i,j-1)
+            A[j * m + i, j * m + i + m] = 1 / dy ** 2  # Coefficient of u(i,j+1)
+            A[j * m + i, j * m + i] = -2 * (dx_j ** 2 + dy ** 2) / (dx_j ** 2 * dy ** 2)  # Coefficient of u(i,j)
+
+            f[j * m + i] = net_upward_heat_flux[j, i]
+
+    def report(xk):
+        frame = inspect.currentframe().f_back
+        print('iter={:d} resid={:f} info={:} ndx1={:} ndx2={:} sclr1={:} sclr2={:} ijob={:}'
+              .format(frame.f_locals['iter_'], frame.f_locals['resid'], frame.f_locals['info'], frame.f_locals['ndx1'],
+                      frame.f_locals['ndx2'], frame.f_locals['sclr1'], frame.f_locals['sclr2'], frame.f_locals['ijob']))
+
+    # logger.info('cond(A)={:f}'.format(np.linalg.cond(A)))
+
+    u, info = sparse_linalg.bicgstab(A, f, callback=report)
+    # logger.info('info={:}'.format(info))
+    # u = sparse_linalg.spsolve(A, f)
+
+    pickle_filepath = 'D:\\output\\u.pickle'
+
+    # Create directory if it does not exist already.
+    pickle_dir = os.path.dirname(pickle_filepath)
+    if not os.path.exists(pickle_dir):
+        logger.info('Creating directory: {:s}'.format(pickle_dir))
+        os.makedirs(pickle_dir)
+
+    with open(pickle_filepath, 'wb') as f:
+        pickle.dump(u, f, pickle.HIGHEST_PROTOCOL)
+
+    with open(pickle_filepath, 'rb') as f:
+        u = pickle.load(f)
+
+    phi = np.reshape(u, (n, m))
+
+    phi[:, 0] = phi[:, 2]
+    phi[:, -1] = phi[:, -3]
+
+    phi_x = np.zeros(phi.shape)
+    phi_y = np.zeros(phi.shape)
+
+    for j in np.arange(1, n - 1):
+        for i in np.arange(m):
+            # Taking modulus of i-1 and i+1 to get the correct index in the special cases of
+            #  * i=0 (180 W) and need to use the value from i=m (180 E)
+            #  * i=m (180 E) and need to use the value from i=0 (180 W)
+            im1 = (i - 1) % m
+            ip1 = (i + 1) % m
+
+            dx_j = distance(lats_nuhf[j], lons_nuhf[0], lats_nuhf[j + 1], lons_nuhf[0])
+            dy = distance(lats_nuhf[j], lons_nuhf[0], lats_nuhf[j], lons_nuhf[1])
+
+            phi_x[j, i] = (phi[j, ip1] - phi[j, im1]) / (2 * dx_j)
+            phi_y[j, i] = (phi[j + 1, i] - phi[j - 1, i]) / (2 * dx_j)
+
+    # Add land to the plot with a 1:50,000,000 scale. Line width is set to 0 so that the edges aren't poofed up in
+    # the smaller plots.
+    land_50m = cartopy.feature.NaturalEarthFeature('physical', 'land', '50m', edgecolor='face', facecolor='dimgray',
+                                                   linewidth=0)
+    ice_50m = cartopy.feature.NaturalEarthFeature('physical', 'antarctic_ice_shelves_polys', '50m', edgecolor='face',
+                                                  facecolor='darkgray', linewidth=0)
+    vector_crs = ccrs.PlateCarree()
+
+    phi, lons_cyclic = cartopy.util.add_cyclic_point(phi, coord=lons_nuhf)
+    phi_x, lons_cyclic = cartopy.util.add_cyclic_point(phi_x, coord=lons_nuhf)
+    phi_y, lons_cyclic = cartopy.util.add_cyclic_point(phi_y, coord=lons_nuhf)
+
+    fig = plt.figure(figsize=(16, 9))
+    matplotlib.rcParams.update({'font.size': 10})
+
+    ax = plt.subplot(111, projection=ccrs.PlateCarree())
+    # ax.add_feature(land_50m)
+    # ax.add_feature(ice_50m)
+    ax.set_extent([-180, 180, -90, 90], ccrs.PlateCarree())
+
+    gl = ax.gridlines(crs=ccrs.PlateCarree(), draw_labels=True, linewidth=1, color='black', alpha=0.8, linestyle='--')
+    LON_TICKS = [-180, -90, 0, 90, 180]
+    LAT_TICKS = [-90, -60, -30, 0, 30, 60, 90]
+    gl.xlabels_top = gl.ylabels_right = False
+    gl.xlocator = mticker.FixedLocator(LON_TICKS)
+    gl.ylocator = mticker.FixedLocator(LAT_TICKS)
+    gl.xformatter = LONGITUDE_FORMATTER
+    gl.yformatter = LATITUDE_FORMATTER
+
+    im = ax.contourf(lons_cyclic, lats_nuhf, phi / 1e12, transform=vector_crs,
+                     cmap=cm.get_cmap('viridis', 15), vmin=-8, vmax=8)
+
+    m = plt.cm.ScalarMappable(cmap=cm.get_cmap('viridis', 15))
+    m.set_array(phi)
+    m.set_clim(-8, 8)
+    clb = fig.colorbar(m, extend='both', fraction=0.046, pad=0.1)
+    clb.ax.set_title(r'$\phi_o$ GW')
+    # clb = fig.colorbar(im, ax=ax, extend='both', fraction=0.046, pad=0.1)
+
+    plt.show()
+    plt.close(fig)
+
+    fig = plt.figure(figsize=(16, 9))
+    matplotlib.rcParams.update({'font.size': 10})
+
+    ax = plt.subplot(111, projection=ccrs.PlateCarree())
+    # ax.add_feature(land_50m)
+    # ax.add_feature(ice_50m)
+    ax.set_extent([-180, 180, -90, 90], ccrs.PlateCarree())
+
+    gl = ax.gridlines(crs=ccrs.PlateCarree(), draw_labels=True, linewidth=1, color='black', alpha=0.8, linestyle='--')
+    LON_TICKS = [-180, -90, 0, 90, 180]
+    LAT_TICKS = [-90, -60, -30, 0, 30, 60, 90]
+    gl.xlabels_top = gl.ylabels_right = False
+    gl.xlocator = mticker.FixedLocator(LON_TICKS)
+    gl.ylocator = mticker.FixedLocator(LAT_TICKS)
+    gl.xformatter = LONGITUDE_FORMATTER
+    gl.yformatter = LATITUDE_FORMATTER
+
+    # im = ax.pcolormesh(lons, lats, field, transform=vector_crs, cmap=cmap, vmin=vmin, vmax=vmax)
+    im = ax.pcolormesh(lons_cyclic, lats_nuhf, phi_x / 1e6,
+                       transform=vector_crs, cmap=cm.get_cmap('seismic', 15), vmin=-1, vmax=1)
+
+    Q1 = ax.quiver(lons_cyclic[::3], lats_nuhf[::3], phi_x[::3, ::3] / 1e6, phi_y[::3, ::3] / 1e6,
+                   pivot='middle', transform=vector_crs, units='width', width=0.002, scale=50)
+
+    m = plt.cm.ScalarMappable(cmap=cm.get_cmap('seismic', 15))
+    m.set_array(u)
+    m.set_clim(-1, 1)
+    clb = fig.colorbar(m, extend='both', fraction=0.046, pad=0.1)
+    clb.ax.set_title(r'MW/m')
+
+    plt.show()
+    plt.close(fig)
+
+    fig = plt.figure(figsize=(16, 9))
+    matplotlib.rcParams.update({'font.size': 10})
+
+    ax = plt.subplot(111, projection=ccrs.PlateCarree())
+    # ax.add_feature(land_50m)
+    # ax.add_feature(ice_50m)
+    ax.set_extent([-180, 180, -90, 90], ccrs.PlateCarree())
+
+    gl = ax.gridlines(crs=ccrs.PlateCarree(), draw_labels=True, linewidth=1, color='black', alpha=0.8, linestyle='--')
+    LON_TICKS = [-180, -90, 0, 90, 180]
+    LAT_TICKS = [-90, -60, -30, 0, 30, 60, 90]
+    gl.xlabels_top = gl.ylabels_right = False
+    gl.xlocator = mticker.FixedLocator(LON_TICKS)
+    gl.ylocator = mticker.FixedLocator(LAT_TICKS)
+    gl.xformatter = LONGITUDE_FORMATTER
+    gl.yformatter = LATITUDE_FORMATTER
+
+    # im = ax.pcolormesh(lons, lats, field, transform=vector_crs, cmap=cmap, vmin=vmin, vmax=vmax)
+    im = ax.pcolormesh(lons_cyclic, lats_nuhf, phi_y / 1e6,
+                       transform=vector_crs, cmap=cm.get_cmap('seismic', 15), vmin=-1, vmax=1)
+
+    Q1 = ax.quiver(lons_cyclic[::3], lats_nuhf[::3], phi_x[::3, ::3] / 1e6, phi_y[::3, ::3] / 1e6,
+                   pivot='middle', transform=vector_crs, units='width', width=0.002, scale=50)
+
+    m = plt.cm.ScalarMappable(cmap=cm.get_cmap('seismic', 15))
+    m.set_array(u)
+    m.set_clim(-1, 1)
+    clb = fig.colorbar(m, extend='both', fraction=0.046, pad=0.1)
+    clb.ax.set_title(r'MW/m')
+
+    plt.show()
+    plt.close(fig)
+
+
+if __name__ == '__main__':
+    solve_for_ocean_heat_transport_potential_cartesian()
