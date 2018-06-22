@@ -276,34 +276,61 @@ def solve_for_ocean_heat_transport_potential_cartesian():
             dx_j = distance(lats_nuhf[j], lons_nuhf[0], lats_nuhf[j + 1], lons_nuhf[0])
             dy = distance(lats_nuhf[j], lons_nuhf[0], lats_nuhf[j], lons_nuhf[1])
 
-            beside_land = False
+            if is_land(lats_nuhf[j], lons_nuhf[i]):
+                n_land_cells = n_land_cells + 1
+                continue
 
-            # Imposing Neumann boundary conditions at continental boundaries.
-            if is_land(lats_nuhf[j-1], lons_nuhf[i]):
-                A[j*m + i, j*m + i - m] = 1
-                beside_land = True
-            if is_land(lats_nuhf[j+1], lons_nuhf[i]):
-                A[j*m + i, j*m + i + m] = 1
-                beside_land = True
-            if is_land(lats_nuhf[j], lons_nuhf[im1]):
-                A[j*m + i, j*m + i - 1] = 1
-                beside_land = True
-            if is_land(lats_nuhf[j], lons_nuhf[ip1]):
-                A[j*m + i, j*m + i + 1] = 1
-                beside_land = True
+            # idx = j * m + i
+            idx = j*m + i - n_land_cells
+            dm_m = int(idx_map[j*m + i] - idx_map[j*m + i - m])
+            dm_p = int(idx_map[j*m + i + m] - idx_map[j*m + i])
+            # print('i={:}, j={:}, n={:}, j*m+i={:}, j*m+i-n={:}, j*m+i-m={:}, '
+            #       'idx_map[j*m+i]={:}, idx_map[j*m+i-m]={:}, dm_m={:}, dm_p={:}'
+            #       .format(i, j, n_land_cells, j*m+i, j*m+i-n_land_cells, j*m+i-m,
+            #               int(idx_map[j*m+i]), int(idx_map[j*m+i-m]), dm_m, dm_p))
 
-            if not beside_land:
-                A[j * m + i, j * m + i - 1] = 1 / dx_j ** 2  # Coefficient of u(i-1,j)
-                A[j * m + i, j * m + i + 1] = 1 / dx_j ** 2  # Coefficient of u(i+1,j)
-                A[j * m + i, j * m + i - m] = 1 / dy ** 2  # Coefficient of u(i,j-1)
-                A[j * m + i, j * m + i + m] = 1 / dy ** 2  # Coefficient of u(i,j+1)
-                A[j * m + i, j * m + i] = -2 * (dx_j ** 2 + dy ** 2) / (dx_j ** 2 * dy ** 2)  # Coefficient of u(i,j)
+            if is_land(lats_nuhf[j-1], lons_nuhf[i]) or is_land(lats_nuhf[j+1], lons_nuhf[i]):
+                dy = 0
+            elif is_land(lats_nuhf[j], lons_nuhf[im1]) or is_land(lats_nuhf[j], lons_nuhf[ip1]):
+                dx_j = 0
 
-            f[j * m + i] = net_upward_heat_flux[j, i]
+            A[idx, idx - 1] = dy**2   # Coefficient of u(i-1,j)
+            A[idx, idx + 1] = dy**2   # Coefficient of u(i+1,j)
+            A[idx, idx - dm_m] = dx_j**2  # Coefficient of u(i,j-1)
+            A[idx, idx + dm_p] = dx_j**2  # Coefficient of u(i,j+1)
+            A[idx, idx] = -2*(dx_j**2 + dy**2)  # Coefficient of u(i,j)
+
+            f[idx] = -(dx_j**2 * dy**2) * net_upward_heat_flux[j, i]
+
+            # A[idx, idx - 1] = 1 / dx_j ** 2  # Coefficient of u(i-1,j)
+            # A[idx, idx + 1] = 1 / dx_j ** 2  # Coefficient of u(i+1,j)
+            # A[idx, idx - dm_m] = 1 / dy ** 2  # Coefficient of u(i,j-1)
+            # A[idx, idx + dm_p] = 1 / dy ** 2  # Coefficient of u(i,j+1)
+            # A[idx, idx] = -2 * (dx_j ** 2 + dy ** 2) / (dx_j ** 2 * dy ** 2)  # Coefficient of u(i,j)
+
+            # Incorperate Neumann boundary condition at continental boundaries for grid points beside land.
+            # if is_land(lats_nuhf[j-1], lons_nuhf[i]):
+            #     A[idx, idx - dm_m] = 0            # Coefficient of u(i,j-1)
+            #     A[idx, idx + dm_p] = 2 / (dy**2)  # Coefficient of u(i,j+1)
+            #
+            # if is_land(lats_nuhf[j+1], lons_nuhf[i]):
+            #     A[idx, idx - dm_m] = 2 / (dy**2)  # Coefficient of u(i,j-1)
+            #     A[idx, idx + dm_p] = 0            # Coefficient of u(i,j+1)
+            #
+            # if is_land(lats_nuhf[j], lons_nuhf[im1]):
+            #     A[idx, idx - 1] = 0              # Coefficient of u(i-1,j)
+            #     A[idx, idx + 1] = 2 / (dx_j**2)  # Coefficient of u(i+1,j)
+            #
+            # if is_land(lats_nuhf[j], lons_nuhf[ip1]):
+            #     A[idx, idx - 1] = 2 / (dx_j**2)  # Coefficient of u(i-1,j)
+            #     A[idx, idx + 1] = 0              # Coefficient of u(i+1,j)
+
+            # f[idx] = net_upward_heat_flux[j, i]
+            # f[idx] = -net_upward_heat_flux[j, i]
 
     logger.info('net_upward_heat_flux.shape={:}'.format(net_upward_heat_flux.shape))
     logger.info('A.shape={:}, f.shape={:}'.format(A.shape, f.shape))
-    logger.info('m={:d}, n={:d}'.format(m, n))
+    logger.info('m={:d}, n={:d}, m*n={:d}, m*n-N_land_cells={:d}'.format(m, n, m*n, m*n-N_land_cells))
 
     def report(xk):
         frame = inspect.currentframe().f_back
