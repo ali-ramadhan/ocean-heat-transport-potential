@@ -213,12 +213,33 @@ def solve_for_ocean_heat_transport_potential_cartesian():
     lons_nuhf = np.array(nuhf_dataset.variables['X'])
     net_upward_heat_flux = np.array(nuhf_dataset.variables['asum'])
 
+    m, n = lons_nuhf.size, lats_nuhf.size
+
     # Setting net upward flux to zero over land.
     for i in range(len(lats_nuhf)):
         for j in range(len(lons_nuhf)):
             lat, lon = lats_nuhf[i], lons_nuhf[j]
             if is_land(lat, lon):
                 net_upward_heat_flux[i, j] = 0
+
+    # Count the number of land points.
+    N_land_cells = 0
+    for j in np.arange(1, n - 1):
+        for i in np.arange(m):
+            lat, lon = lats_nuhf[j], lons_nuhf[i]
+            if is_land(lat, lon):
+                N_land_cells = N_land_cells + 1
+
+    logger.info('N_land_cells={:d}'.format(N_land_cells))
+
+    idx_map = np.zeros((m*n, 1))
+    n_land_cells = 0
+    for j in np.arange(1, n - 1):
+        for i in np.arange(m):
+            lat, lon = lats_nuhf[j], lons_nuhf[i]
+            if is_land(lat, lon):
+                n_land_cells = n_land_cells + 1
+            idx_map[j*m + i] = j * m + i - n_land_cells
 
     # Normalize array to integrate to zero, to satisfy the compatibility condition.
     logger.info('Before normalization: sum={:f}, mean={:f}'
@@ -229,17 +250,20 @@ def solve_for_ocean_heat_transport_potential_cartesian():
     logger.info('After normalization: sum={:f}, mean={:f}'
                 .format(np.sum(net_upward_heat_flux), np.mean(net_upward_heat_flux)))
 
-    plot_scalar_field(lats_nuhf, lons_nuhf, net_upward_heat_flux, cmap=cmocean.cm.balance, vmin=-100, vmax=100)
+    # lons_nuhf = np.append(lons_nuhf[97:], lons_nuhf[0:97])
+    # net_upward_heat_flux = np.append(net_upward_heat_flux[:, 97:], net_upward_heat_flux[:, 0:97], axis=1)
+
+    plot_scalar_field(lats_nuhf, lons_nuhf, net_upward_heat_flux, cmap=cmocean.cm.balance, vmin=-150, vmax=150)
 
     # Setting up the linear system A*u = f for the discretized Poisson equation.
-    m, n = lons_nuhf.size, lats_nuhf.size
-
     # A = sparse.lil_matrix((m*n, m*n))
-    A = np.zeros((m * n, m * n))
-    f = np.zeros((m * n, 1))
 
-    # Using the 90S and 90N rows as ghost points.
-    # lats_nuhf = lats_nuhf[1:-1]
+    # A = np.zeros((m * n, m * n))
+    # f = np.zeros((m * n, 1))
+    A = sparse.lil_matrix((m * n - N_land_cells, m * n - N_land_cells))
+    f = np.zeros((m * n - N_land_cells, 1))
+
+    n_land_cells = 0
 
     for j in np.arange(1, n - 1):
         for i in np.arange(m):
@@ -287,10 +311,30 @@ def solve_for_ocean_heat_transport_potential_cartesian():
               .format(frame.f_locals['iter_'], frame.f_locals['resid'], frame.f_locals['info'], frame.f_locals['ndx1'],
                       frame.f_locals['ndx2'], frame.f_locals['sclr1'], frame.f_locals['sclr2'], frame.f_locals['ijob']))
 
-    u, _ = sparse_linalg.cgs(A, f, callback=report)
-    # u, _ = sparse_linalg.cg(A, f, callback=report)
+    u_no_land, _ = sparse_linalg.bicgstab(A, f, tol=1e-5, callback=report)
 
-    pickle_filepath = 'D:\\output\\u_cg.pickle'
+    # The potential is unique up to a constant, so we pick the "gauge" or normalization that it must integrate to zero.
+    logger.info('Before normalization: sum(u_no_land)={:f}, mean(u_no_land)={:f}'
+                .format(np.sum(u_no_land), np.mean(np.mean(u_no_land))))
+
+    u_no_land = u_no_land - np.mean(u_no_land)
+
+    logger.info('Before normalization: sum(u_no_land)={:f}, mean(u_no_land)={:f}'
+                .format(np.sum(u_no_land), np.mean(np.mean(u_no_land))))
+
+    # Add the land cells back in.
+    u = np.zeros((m*n, 1))
+    n_land_cells = 0
+    for j in np.arange(1, n - 1):
+        for i in np.arange(m):
+            lat, lon = lats_nuhf[j], lons_nuhf[i]
+            if is_land(lat, lon):
+                u[j*m + i] = 0
+                n_land_cells = n_land_cells + 1
+            else:
+                u[j*m + i] = u_no_land[j*m + i - n_land_cells]
+
+    pickle_filepath = 'D:\\output\\phi_bicgstab.pickle'
 
     # Create directory if it does not exist already.
     pickle_dir = os.path.dirname(pickle_filepath)
