@@ -20,6 +20,7 @@ from matplotlib.gridspec import GridSpec
 import cartopy
 import cartopy.util
 import cartopy.crs as ccrs
+from cartopy.mpl.ticker import LongitudeFormatter, LatitudeFormatter
 from cartopy.mpl.gridliner import LATITUDE_FORMATTER, LONGITUDE_FORMATTER
 import cmocean.cm
 
@@ -30,6 +31,7 @@ logging.config.fileConfig('logging.ini')
 logger = logging.getLogger(__name__)
 
 data_dir_path = 'D:\\data\\'
+figure_dir_path = 'D:\\figures\\'
 
 # Load land sea mask (land=0, sea=1)
 lsmask_filepath = os.path.join(data_dir_path, 'lsmask.oisst.v2.nc')
@@ -65,10 +67,10 @@ def distance(lat1, lon1, lat2, lon2):
 def plot_scalar_field(lats, lons, field, cmap, vmin, vmax):
     # Add land to the plot with a 1:50,000,000 scale. Line width is set to 0 so that the edges aren't poofed up in
     # the smaller plots.
-    land_50m = cartopy.feature.NaturalEarthFeature('physical', 'land', '50m', edgecolor='face', facecolor='dimgray',
-                                                   linewidth=0)
-    ice_50m = cartopy.feature.NaturalEarthFeature('physical', 'antarctic_ice_shelves_polys', '50m', edgecolor='face',
-                                                  facecolor='darkgray', linewidth=0)
+    land_50m = cartopy.feature.NaturalEarthFeature('physical', 'land', '50m', edgecolor='black', facecolor='white',
+                                                   linewidth=0.5)
+    ice_50m = cartopy.feature.NaturalEarthFeature('physical', 'antarctic_ice_shelves_polys', '50m', edgecolor='black',
+                                                  facecolor='white', linewidth=0.5)
     vector_crs = ccrs.PlateCarree()
 
     field, lons = cartopy.util.add_cyclic_point(field, coord=lons)
@@ -76,15 +78,37 @@ def plot_scalar_field(lats, lons, field, cmap, vmin, vmax):
     fig = plt.figure(figsize=(16, 9))
     matplotlib.rcParams.update({'font.size': 10})
 
-    ax = plt.subplot(111, projection=ccrs.PlateCarree())
-    # ax.add_feature(land_50m)
-    # ax.add_feature(ice_50m)
-    ax.set_extent([-180, 180, -90, 90], ccrs.PlateCarree())
+    ax = plt.subplot(111, projection=ccrs.PlateCarree(central_longitude=180))
+    ax.add_feature(land_50m)
+    ax.add_feature(ice_50m)
+    ax.set_extent([-180, 180, -90, 90], ccrs.PlateCarree(central_longitude=180))
+
+    ax.set_xticks([-180, -120, -60, 0, 60, 120, 180], crs=ccrs.PlateCarree(central_longitude=180))
+    ax.set_yticks([-90, -60, -30, 0, 30, 60, 90], crs=ccrs.PlateCarree(central_longitude=180))
+    lon_formatter = LongitudeFormatter(zero_direction_label=True)
+    lat_formatter = LatitudeFormatter()
+    ax.xaxis.set_major_formatter(lon_formatter)
+    ax.yaxis.set_major_formatter(lat_formatter)
+
+    # gl = ax.gridlines(crs=ccrs.PlateCarree(central_longitude=180), draw_labels=True,
+    #                   linewidth=1, color='black', alpha=0.8, linestyle='--')
+    # LON_TICKS = [-180, -90, 0, 90, 180]
+    # LAT_TICKS = [-90, -60, -30, 0, 30, 60, 90]
+    # gl.xlabels_top = gl.ylabels_right = False
+    # gl.xlocator = mticker.FixedLocator(LON_TICKS)
+    # gl.ylocator = mticker.FixedLocator(LAT_TICKS)
+    # gl.xformatter = LONGITUDE_FORMATTER
+    # gl.yformatter = LATITUDE_FORMATTER
 
     im = ax.pcolormesh(lons, lats, field, transform=vector_crs, cmap=cmap, vmin=vmin, vmax=vmax)
     clb = fig.colorbar(im, ax=ax, extend='both', fraction=0.046, pad=0.1)
+    clb.ax.set_title(r'W/m$^2$')
 
-    plt.show()
+    plt.title('Net upward heat flux')
+
+    png_filepath = os.path.join(figure_dir_path, 'net_upward_heat_flux.png')
+    logger.info('Saving diagnostic figure: {:s}'.format(png_filepath))
+    plt.savefig(png_filepath, dpi=300, format='png', transparent=False)
     plt.close()
 
 
@@ -377,8 +401,10 @@ def solve_for_ocean_heat_transport_potential_cartesian():
 
     phi = np.reshape(u, (n, m))
 
-    phi[:, 0] = phi[:, 2]
-    phi[:, -1] = phi[:, -3]
+    # phi[:, 0] = phi[:, 1]
+    # phi[:, -1] = phi[:, -2]
+    phi[0, :] = phi[1, :]
+    phi[-1, :] = phi[-2, :]
 
     phi_x = np.zeros(phi.shape)
     phi_y = np.zeros(phi.shape)
@@ -394,15 +420,20 @@ def solve_for_ocean_heat_transport_potential_cartesian():
             dx_j = distance(lats_nuhf[j], lons_nuhf[0], lats_nuhf[j + 1], lons_nuhf[0])
             dy = distance(lats_nuhf[j], lons_nuhf[0], lats_nuhf[j], lons_nuhf[1])
 
-            phi_x[j, i] = (phi[j, ip1] - phi[j, im1]) / (2 * dx_j)
-            phi_y[j, i] = (phi[j + 1, i] - phi[j - 1, i]) / (2 * dx_j)
+            if is_land(lats_nuhf[j], lons_nuhf[i]) \
+                    or is_land(lats_nuhf[j-1], lons_nuhf[i]) or is_land(lats_nuhf[j+1], lons_nuhf[i]) \
+                    or is_land(lats_nuhf[j], lons_nuhf[im1]) or is_land(lats_nuhf[j], lons_nuhf[ip1]):
+                continue
+            else:
+                phi_x[j, i] = (phi[j, ip1] - phi[j, im1]) / (2*dx_j)
+                phi_y[j, i] = (phi[j+1, i] - phi[j-1, i]) / (2*dy)
 
     # Add land to the plot with a 1:50,000,000 scale. Line width is set to 0 so that the edges aren't poofed up in
     # the smaller plots.
-    land_50m = cartopy.feature.NaturalEarthFeature('physical', 'land', '50m', edgecolor='face', facecolor='dimgray',
-                                                   linewidth=0)
-    ice_50m = cartopy.feature.NaturalEarthFeature('physical', 'antarctic_ice_shelves_polys', '50m', edgecolor='face',
-                                                  facecolor='darkgray', linewidth=0)
+    land_50m = cartopy.feature.NaturalEarthFeature('physical', 'land', '50m', edgecolor='black', facecolor='white',
+                                                   linewidth=0.5)
+    ice_50m = cartopy.feature.NaturalEarthFeature('physical', 'antarctic_ice_shelves_polys', '50m', edgecolor='black',
+                                                  facecolor='white', linewidth=0.5)
     vector_crs = ccrs.PlateCarree()
 
     phi, lons_cyclic = cartopy.util.add_cyclic_point(phi, coord=lons_nuhf)
@@ -412,29 +443,96 @@ def solve_for_ocean_heat_transport_potential_cartesian():
     fig = plt.figure(figsize=(16, 9))
     matplotlib.rcParams.update({'font.size': 10})
 
-    ax = plt.subplot(111, projection=ccrs.PlateCarree())
-    # ax.add_feature(land_50m)
-    # ax.add_feature(ice_50m)
-    ax.set_extent([-180, 180, -90, 90], ccrs.PlateCarree())
+    # Plot ocean heat potential phi_o.
+    ax = plt.subplot(111, projection=ccrs.PlateCarree(central_longitude=180))
+    ax.add_feature(land_50m)
+    ax.add_feature(ice_50m)
+    ax.set_extent([-180, 180, -90, 90], ccrs.PlateCarree(central_longitude=180))
 
-    gl = ax.gridlines(crs=ccrs.PlateCarree(), draw_labels=True, linewidth=1, color='black', alpha=0.8, linestyle='--')
-    LON_TICKS = [-180, -90, 0, 90, 180]
-    LAT_TICKS = [-90, -60, -30, 0, 30, 60, 90]
-    gl.xlabels_top = gl.ylabels_right = False
-    gl.xlocator = mticker.FixedLocator(LON_TICKS)
-    gl.ylocator = mticker.FixedLocator(LAT_TICKS)
-    gl.xformatter = LONGITUDE_FORMATTER
-    gl.yformatter = LATITUDE_FORMATTER
+    # gl = ax.gridlines(crs=ccrs.PlateCarree(central_longitude=180), draw_labels=True,
+    #                   linewidth=1, color='black', alpha=0.8, linestyle='--')
+    # LON_TICKS = [-180, -90, 0, 90, 180]
+    # LAT_TICKS = [-90, -60, -30, 0, 30, 60, 90]
+    # gl.xlabels_top = gl.ylabels_right = False
+    # gl.xlocator = mticker.FixedLocator(LON_TICKS)
+    # gl.ylocator = mticker.FixedLocator(LAT_TICKS)
+    # gl.xformatter = LONGITUDE_FORMATTER
+    # gl.yformatter = LATITUDE_FORMATTER
 
-    im = ax.contourf(lons_cyclic, lats_nuhf, phi, transform=vector_crs, cmap=cmocean.cm.balance)
+    ax.set_xticks([-180, -120, -60, 0, 60, 120, 180], crs=ccrs.PlateCarree(central_longitude=180))
+    ax.set_yticks([-90, -60, -30, 0, 30, 60, 90], crs=ccrs.PlateCarree(central_longitude=180))
+    lon_formatter = LongitudeFormatter(zero_direction_label=True)
+    lat_formatter = LatitudeFormatter()
+    ax.xaxis.set_major_formatter(lon_formatter)
+    ax.yaxis.set_major_formatter(lat_formatter)
 
-    # m = plt.cm.ScalarMappable(cmap=cm.get_cmap('viridis', 15))
+    im = ax.contourf(lons_cyclic, lats_nuhf, phi / 1e15, transform=vector_crs, cmap=cm.get_cmap('PuOr', 15))
+
+    # m = plt.cm.ScalarMappable(cmap=cm.get_cmap('PuOr', 15))
     # m.set_array(phi)
-    # m.set_clim(-8, 8)
+    # m.set_clim(-2, 2)
     # clb = fig.colorbar(m, extend='both', fraction=0.046, pad=0.1)
-    # clb.ax.set_title(r'$\phi_o$ GW')
+    # clb.ax.set_title(r'$\phi_o$ (PW)')
 
     clb = fig.colorbar(im, ax=ax, extend='both', fraction=0.046, pad=0.1)
+    clb.ax.set_title(r'PW ($\times 10^{15}$ W)')
+
+    plt.title(r'Ocean heat transport potential $\phi_o$')
+
+    png_filepath = os.path.join(figure_dir_path, 'ocean_heat_transport_potential.png')
+    logger.info('Saving diagnostic figure: {:s}'.format(png_filepath))
+    plt.savefig(png_filepath, dpi=300, format='png', transparent=False)
+    plt.close(fig)
+
+    fig = plt.figure(figsize=(16, 9))
+    matplotlib.rcParams.update({'font.size': 10})
+
+    # Plot zonal heat transport.
+    ax = plt.subplot(111, projection=ccrs.PlateCarree(central_longitude=180))
+    ax.add_feature(land_50m)
+    ax.add_feature(ice_50m)
+    ax.set_extent([-180, 180, -90, 90], ccrs.PlateCarree(central_longitude=180))
+
+    # gl = ax.gridlines(crs=ccrs.PlateCarree(central_longitude=180), draw_labels=True,
+    #                   linewidth=1, color='black', alpha=0.8, linestyle='--')
+    # LON_TICKS = [-180, -90, 0, 90, 180]
+    # LAT_TICKS = [-90, -60, -30, 0, 30, 60, 90]
+    # gl.xlabels_top = gl.ylabels_right = False
+    # gl.xlocator = mticker.FixedLocator(LON_TICKS)
+    # gl.ylocator = mticker.FixedLocator(LAT_TICKS)
+    # gl.xformatter = LONGITUDE_FORMATTER
+    # gl.yformatter = LATITUDE_FORMATTER
+
+    ax.set_xticks([-180, -120, -60, 0, 60, 120, 180], crs=ccrs.PlateCarree(central_longitude=180))
+    ax.set_yticks([-90, -60, -30, 0, 30, 60, 90], crs=ccrs.PlateCarree(central_longitude=180))
+    lon_formatter = LongitudeFormatter(zero_direction_label=True)
+    lat_formatter = LatitudeFormatter()
+    ax.xaxis.set_major_formatter(lon_formatter)
+    ax.yaxis.set_major_formatter(lat_formatter)
+
+    # nuhf, lons_nuhf2 = cartopy.util.add_cyclic_point(net_upward_heat_flux, coord=lons_nuhf)
+    # im = ax.pcolormesh(lons_nuhf2, lats_nuhf, nuhf, transform=vector_crs, cmap=cmocean.cm.balance, vmin=-150, vmax=150)
+
+    # im = ax.pcolormesh(lons_cyclic, lats_nuhf, phi_x / 1e8, transform=vector_crs,
+    #                    cmap=cmocean.cm.balance, vmin=-1, vmax=1)
+
+    Q = ax.quiver(lons_cyclic[::3], lats_nuhf[::3], phi_x[::3, ::3] / 1e8, phi_y[::3, ::3] / 1e8,
+                  pivot='middle', transform=vector_crs, units='width', width=0.002)
+    plt.quiverkey(Q, 0.70, 0.88, 1, r'$10^8$ W/m ', labelpos='E', coordinates='figure',
+                  fontproperties={'size': 11}, transform=ax.transAxes)
+
+    # ax.contour(lons_cyclic, lats_nuhf, phi / 1e15, levels=[-0.20, -0.15, -0.10, -0.05, 0, 0.05, 0.10, 0.15],
+    #            colors='red', linewidths=2, transform=vector_crs)
+
+    # clb = fig.colorbar(im, ax=ax, extend='both', fraction=0.046, pad=0.1)
+    # clb.ax.set_title('Net upward\nheat flux ' r'(W/m$^2$)')
+    # clb.ax.set_title(r'$10^8$ W/m ')
+
+    plt.title(r'Ocean heat transport $\nabla \phi_o$')
+
+    png_filepath = os.path.join(figure_dir_path, 'ocean_heat_transport.png')
+    logger.info('Saving diagnostic figure: {:s}'.format(png_filepath))
+    plt.savefig(png_filepath, dpi=300, format='png', transparent=False)
 
     plt.show()
     plt.close(fig)
@@ -442,67 +540,40 @@ def solve_for_ocean_heat_transport_potential_cartesian():
     fig = plt.figure(figsize=(16, 9))
     matplotlib.rcParams.update({'font.size': 10})
 
-    ax = plt.subplot(111, projection=ccrs.PlateCarree())
-    # ax.add_feature(land_50m)
-    # ax.add_feature(ice_50m)
-    ax.set_extent([-180, 180, -90, 90], ccrs.PlateCarree())
+    ax = plt.subplot(111, projection=ccrs.PlateCarree(central_longitude=180))
+    ax.add_feature(land_50m)
+    ax.add_feature(ice_50m)
+    ax.set_extent([-180, 180, -90, 90], ccrs.PlateCarree(central_longitude=180))
 
-    gl = ax.gridlines(crs=ccrs.PlateCarree(), draw_labels=True, linewidth=1, color='black', alpha=0.8, linestyle='--')
-    LON_TICKS = [-180, -90, 0, 90, 180]
-    LAT_TICKS = [-90, -60, -30, 0, 30, 60, 90]
-    gl.xlabels_top = gl.ylabels_right = False
-    gl.xlocator = mticker.FixedLocator(LON_TICKS)
-    gl.ylocator = mticker.FixedLocator(LAT_TICKS)
-    gl.xformatter = LONGITUDE_FORMATTER
-    gl.yformatter = LATITUDE_FORMATTER
+    # gl = ax.gridlines(crs=ccrs.PlateCarree(central_longitude=180), draw_labels=True,
+    #                   linewidth=1, color='black', alpha=0.8, linestyle='--')
+    # LON_TICKS = [-180, -90, 0, 90, 180]
+    # LAT_TICKS = [-90, -60, -30, 0, 30, 60, 90]
+    # gl.xlabels_top = gl.ylabels_right = False
+    # gl.xlocator = mticker.FixedLocator(LON_TICKS)
+    # gl.ylocator = mticker.FixedLocator(LAT_TICKS)
+    # gl.xformatter = LONGITUDE_FORMATTER
+    # gl.yformatter = LATITUDE_FORMATTER
 
-    # im = ax.pcolormesh(lons, lats, field, transform=vector_crs, cmap=cmap, vmin=vmin, vmax=vmax)
-    im = ax.pcolormesh(lons_cyclic, lats_nuhf, phi_x, transform=vector_crs, cmap=cmocean.cm.balance)
+    ax.set_xticks([-180, -120, -60, 0, 60, 120, 180], crs=ccrs.PlateCarree(central_longitude=180))
+    ax.set_yticks([-90, -60, -30, 0, 30, 60, 90], crs=ccrs.PlateCarree(central_longitude=180))
+    lon_formatter = LongitudeFormatter(zero_direction_label=True)
+    lat_formatter = LatitudeFormatter()
+    ax.xaxis.set_major_formatter(lon_formatter)
+    ax.yaxis.set_major_formatter(lat_formatter)
 
-    # Q1 = ax.quiver(lons_cyclic[::3], lats_nuhf[::3], phi_x[::3, ::3] / 1e6, phi_y[::3, ::3] / 1e6,
-    #                pivot='middle', transform=vector_crs, units='width', width=0.002, scale=50)
+    im = ax.pcolormesh(lons_cyclic, lats_nuhf, phi_y / 1e8, transform=vector_crs,
+                       cmap=cmocean.cm.balance, vmin=-1, vmax=1)
 
-    # m = plt.cm.ScalarMappable(cmap=cm.get_cmap('seismic', 15))
-    # m.set_array(u)
-    # m.set_clim(-1, 1)
-    # clb = fig.colorbar(m, extend='both', fraction=0.046, pad=0.1)
-    # clb.ax.set_title(r'MW/m')
-
-    clb = fig.colorbar(im, ax=ax, extend='both', fraction=0.046, pad=0.1)
-
-    plt.show()
-    plt.close(fig)
-
-    fig = plt.figure(figsize=(16, 9))
-    matplotlib.rcParams.update({'font.size': 10})
-
-    ax = plt.subplot(111, projection=ccrs.PlateCarree())
-    # ax.add_feature(land_50m)
-    # ax.add_feature(ice_50m)
-    ax.set_extent([-180, 180, -90, 90], ccrs.PlateCarree())
-
-    gl = ax.gridlines(crs=ccrs.PlateCarree(), draw_labels=True, linewidth=1, color='black', alpha=0.8, linestyle='--')
-    LON_TICKS = [-180, -90, 0, 90, 180]
-    LAT_TICKS = [-90, -60, -30, 0, 30, 60, 90]
-    gl.xlabels_top = gl.ylabels_right = False
-    gl.xlocator = mticker.FixedLocator(LON_TICKS)
-    gl.ylocator = mticker.FixedLocator(LAT_TICKS)
-    gl.xformatter = LONGITUDE_FORMATTER
-    gl.yformatter = LATITUDE_FORMATTER
-
-    # im = ax.pcolormesh(lons, lats, field, transform=vector_crs, cmap=cmap, vmin=vmin, vmax=vmax)
-    im = ax.pcolormesh(lons_cyclic, lats_nuhf, phi_y, transform=vector_crs, cmap=cmocean.cm.balance)
-
-    # Q1 = ax.quiver(lons_cyclic[::3], lats_nuhf[::3], phi_x[::3, ::3] / 1e6, phi_y[::3, ::3] / 1e6,
-    #                pivot='middle', transform=vector_crs, units='width', width=0.002, scale=50)
-    #
-    # m = plt.cm.ScalarMappable(cmap=cm.get_cmap('seismic', 15))
-    # m.set_array(u)
-    # m.set_clim(-1, 1)
-    # clb = fig.colorbar(m, extend='both', fraction=0.046, pad=0.1)
-    # clb.ax.set_title(r'MW/m')
+    Q = ax.quiver(lons_cyclic[::3], lats_nuhf[::3], phi_x[::3, ::3] / 1e8, phi_y[::3, ::3] / 1e8,
+                  pivot='middle', transform=vector_crs, units='width', width=0.002)
+    plt.quiverkey(Q, 0.70, 0.88, 1, r'$10^8$ W/m ', labelpos='E', coordinates='figure',
+                  fontproperties={'size': 11}, transform=ax.transAxes)
 
     clb = fig.colorbar(im, ax=ax, extend='both', fraction=0.046, pad=0.1)
+    clb.ax.set_title(r'$10^8$ W/m ')
+
+    plt.title('Meridional ocean heat transport $d\phi_o/dy$')
 
     plt.show()
     plt.close(fig)
