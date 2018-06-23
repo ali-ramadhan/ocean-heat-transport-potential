@@ -445,8 +445,8 @@ def solve_for_ocean_heat_transport_potential_cartesian():
 
     # Plot ocean heat potential phi_o.
     ax = plt.subplot(111, projection=ccrs.PlateCarree(central_longitude=180))
-    ax.add_feature(land_50m)
-    ax.add_feature(ice_50m)
+    # ax.add_feature(land_50m)
+    # ax.add_feature(ice_50m)
     ax.set_extent([-180, 180, -90, 90], ccrs.PlateCarree(central_longitude=180))
 
     # gl = ax.gridlines(crs=ccrs.PlateCarree(central_longitude=180), draw_labels=True,
@@ -466,7 +466,8 @@ def solve_for_ocean_heat_transport_potential_cartesian():
     ax.xaxis.set_major_formatter(lon_formatter)
     ax.yaxis.set_major_formatter(lat_formatter)
 
-    im = ax.contourf(lons_cyclic, lats_nuhf, phi / 1e15, transform=vector_crs, cmap=cm.get_cmap('PuOr', 15))
+    im = ax.contourf(lons_cyclic, lats_nuhf, phi / 1e15, transform=vector_crs, cmap=cm.get_cmap('PuOr', 15),
+                     vmin=np.min(phi/1e15), vmax=np.max(phi/1e15))
 
     # m = plt.cm.ScalarMappable(cmap=cm.get_cmap('PuOr', 15))
     # m.set_array(phi)
@@ -489,8 +490,8 @@ def solve_for_ocean_heat_transport_potential_cartesian():
 
     # Plot zonal heat transport.
     ax = plt.subplot(111, projection=ccrs.PlateCarree(central_longitude=180))
-    ax.add_feature(land_50m)
-    ax.add_feature(ice_50m)
+    # ax.add_feature(land_50m)
+    # ax.add_feature(ice_50m)
     ax.set_extent([-180, 180, -90, 90], ccrs.PlateCarree(central_longitude=180))
 
     # gl = ax.gridlines(crs=ccrs.PlateCarree(central_longitude=180), draw_labels=True,
@@ -510,8 +511,8 @@ def solve_for_ocean_heat_transport_potential_cartesian():
     ax.xaxis.set_major_formatter(lon_formatter)
     ax.yaxis.set_major_formatter(lat_formatter)
 
-    # nuhf, lons_nuhf2 = cartopy.util.add_cyclic_point(net_upward_heat_flux, coord=lons_nuhf)
-    # im = ax.pcolormesh(lons_nuhf2, lats_nuhf, nuhf, transform=vector_crs, cmap=cmocean.cm.balance, vmin=-150, vmax=150)
+    nuhf, lons_nuhf2 = cartopy.util.add_cyclic_point(net_upward_heat_flux, coord=lons_nuhf)
+    im = ax.pcolormesh(lons_nuhf2, lats_nuhf, nuhf, transform=vector_crs, cmap=cmocean.cm.balance, vmin=-150, vmax=150)
 
     # im = ax.pcolormesh(lons_cyclic, lats_nuhf, phi_x / 1e8, transform=vector_crs,
     #                    cmap=cmocean.cm.balance, vmin=-1, vmax=1)
@@ -521,11 +522,13 @@ def solve_for_ocean_heat_transport_potential_cartesian():
     plt.quiverkey(Q, 0.70, 0.88, 1, r'$10^8$ W/m ', labelpos='E', coordinates='figure',
                   fontproperties={'size': 11}, transform=ax.transAxes)
 
+    # ax.streamplot(lons_cyclic, lats_nuhf, phi_x, phi_y, color='black', linewidth=2, density=5, transform=vector_crs)
+
     # ax.contour(lons_cyclic, lats_nuhf, phi / 1e15, levels=[-0.20, -0.15, -0.10, -0.05, 0, 0.05, 0.10, 0.15],
     #            colors='red', linewidths=2, transform=vector_crs)
 
-    # clb = fig.colorbar(im, ax=ax, extend='both', fraction=0.046, pad=0.1)
-    # clb.ax.set_title('Net upward\nheat flux ' r'(W/m$^2$)')
+    clb = fig.colorbar(im, ax=ax, extend='both', fraction=0.046, pad=0.1)
+    clb.ax.set_title('Net upward\nheat flux ' r'(W/m$^2$)')
     # clb.ax.set_title(r'$10^8$ W/m ')
 
     plt.title(r'Ocean heat transport $\nabla \phi_o$')
@@ -534,49 +537,49 @@ def solve_for_ocean_heat_transport_potential_cartesian():
     logger.info('Saving diagnostic figure: {:s}'.format(png_filepath))
     plt.savefig(png_filepath, dpi=300, format='png', transparent=False)
 
-    plt.show()
+    # plt.show()
     plt.close(fig)
 
-    fig = plt.figure(figsize=(16, 9))
-    matplotlib.rcParams.update({'font.size': 10})
-
-    ax = plt.subplot(111, projection=ccrs.PlateCarree(central_longitude=180))
-    ax.add_feature(land_50m)
-    ax.add_feature(ice_50m)
-    ax.set_extent([-180, 180, -90, 90], ccrs.PlateCarree(central_longitude=180))
-
-    # gl = ax.gridlines(crs=ccrs.PlateCarree(central_longitude=180), draw_labels=True,
-    #                   linewidth=1, color='black', alpha=0.8, linestyle='--')
-    # LON_TICKS = [-180, -90, 0, 90, 180]
-    # LAT_TICKS = [-90, -60, -30, 0, 30, 60, 90]
-    # gl.xlabels_top = gl.ylabels_right = False
-    # gl.xlocator = mticker.FixedLocator(LON_TICKS)
-    # gl.ylocator = mticker.FixedLocator(LAT_TICKS)
-    # gl.xformatter = LONGITUDE_FORMATTER
-    # gl.yformatter = LATITUDE_FORMATTER
-
-    ax.set_xticks([-180, -120, -60, 0, 60, 120, 180], crs=ccrs.PlateCarree(central_longitude=180))
-    ax.set_yticks([-90, -60, -30, 0, 30, 60, 90], crs=ccrs.PlateCarree(central_longitude=180))
-    lon_formatter = LongitudeFormatter(zero_direction_label=True)
-    lat_formatter = LatitudeFormatter()
-    ax.xaxis.set_major_formatter(lon_formatter)
-    ax.yaxis.set_major_formatter(lat_formatter)
-
-    im = ax.pcolormesh(lons_cyclic, lats_nuhf, phi_y / 1e8, transform=vector_crs,
-                       cmap=cmocean.cm.balance, vmin=-1, vmax=1)
-
-    Q = ax.quiver(lons_cyclic[::3], lats_nuhf[::3], phi_x[::3, ::3] / 1e8, phi_y[::3, ::3] / 1e8,
-                  pivot='middle', transform=vector_crs, units='width', width=0.002)
-    plt.quiverkey(Q, 0.70, 0.88, 1, r'$10^8$ W/m ', labelpos='E', coordinates='figure',
-                  fontproperties={'size': 11}, transform=ax.transAxes)
-
-    clb = fig.colorbar(im, ax=ax, extend='both', fraction=0.046, pad=0.1)
-    clb.ax.set_title(r'$10^8$ W/m ')
-
-    plt.title('Meridional ocean heat transport $d\phi_o/dy$')
-
-    plt.show()
-    plt.close(fig)
+    # fig = plt.figure(figsize=(16, 9))
+    # matplotlib.rcParams.update({'font.size': 10})
+    #
+    # ax = plt.subplot(111, projection=ccrs.PlateCarree(central_longitude=180))
+    # ax.add_feature(land_50m)
+    # ax.add_feature(ice_50m)
+    # ax.set_extent([-180, 180, -90, 90], ccrs.PlateCarree(central_longitude=180))
+    #
+    # # gl = ax.gridlines(crs=ccrs.PlateCarree(central_longitude=180), draw_labels=True,
+    # #                   linewidth=1, color='black', alpha=0.8, linestyle='--')
+    # # LON_TICKS = [-180, -90, 0, 90, 180]
+    # # LAT_TICKS = [-90, -60, -30, 0, 30, 60, 90]
+    # # gl.xlabels_top = gl.ylabels_right = False
+    # # gl.xlocator = mticker.FixedLocator(LON_TICKS)
+    # # gl.ylocator = mticker.FixedLocator(LAT_TICKS)
+    # # gl.xformatter = LONGITUDE_FORMATTER
+    # # gl.yformatter = LATITUDE_FORMATTER
+    #
+    # ax.set_xticks([-180, -120, -60, 0, 60, 120, 180], crs=ccrs.PlateCarree(central_longitude=180))
+    # ax.set_yticks([-90, -60, -30, 0, 30, 60, 90], crs=ccrs.PlateCarree(central_longitude=180))
+    # lon_formatter = LongitudeFormatter(zero_direction_label=True)
+    # lat_formatter = LatitudeFormatter()
+    # ax.xaxis.set_major_formatter(lon_formatter)
+    # ax.yaxis.set_major_formatter(lat_formatter)
+    #
+    # im = ax.pcolormesh(lons_cyclic, lats_nuhf, phi_y / 1e8, transform=vector_crs,
+    #                    cmap=cmocean.cm.balance, vmin=-1, vmax=1)
+    #
+    # Q = ax.quiver(lons_cyclic[::3], lats_nuhf[::3], phi_x[::3, ::3] / 1e8, phi_y[::3, ::3] / 1e8,
+    #               pivot='middle', transform=vector_crs, units='width', width=0.002)
+    # plt.quiverkey(Q, 0.70, 0.88, 1, r'$10^8$ W/m ', labelpos='E', coordinates='figure',
+    #               fontproperties={'size': 11}, transform=ax.transAxes)
+    #
+    # clb = fig.colorbar(im, ax=ax, extend='both', fraction=0.046, pad=0.1)
+    # clb.ax.set_title(r'$10^8$ W/m ')
+    #
+    # plt.title('Meridional ocean heat transport $d\phi_o/dy$')
+    #
+    # plt.show()
+    # plt.close(fig)
 
 
 if __name__ == '__main__':
