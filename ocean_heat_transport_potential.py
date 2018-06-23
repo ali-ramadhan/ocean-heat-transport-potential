@@ -306,25 +306,44 @@ def solve_for_ocean_heat_transport_potential_cartesian():
 
             # idx = j * m + i
             idx = j*m + i - n_land_cells
-            dm_m = int(idx_map[j*m + i] - idx_map[j*m + i - m])
-            dm_p = int(idx_map[j*m + i + m] - idx_map[j*m + i])
+
+            dm_m = int(idx_map[j*m + i] - idx_map[j*m + i - m])  # \Delta m_-: the index of the gridpoint above.
+            dm_p = int(idx_map[j*m + i + m] - idx_map[j*m + i])  # \Delta m_+: the index of the gridpoint below.
+
             # print('i={:}, j={:}, n={:}, j*m+i={:}, j*m+i-n={:}, j*m+i-m={:}, '
             #       'idx_map[j*m+i]={:}, idx_map[j*m+i-m]={:}, dm_m={:}, dm_p={:}'
             #       .format(i, j, n_land_cells, j*m+i, j*m+i-n_land_cells, j*m+i-m,
             #               int(idx_map[j*m+i]), int(idx_map[j*m+i-m]), dm_m, dm_p))
 
-            if is_land(lats_nuhf[j-1], lons_nuhf[i]) or is_land(lats_nuhf[j+1], lons_nuhf[i]):
-                dy = 0
-            elif is_land(lats_nuhf[j], lons_nuhf[im1]) or is_land(lats_nuhf[j], lons_nuhf[ip1]):
-                dx_j = 0
+            # if is_land(lats_nuhf[j-1], lons_nuhf[i]) or is_land(lats_nuhf[j+1], lons_nuhf[i]):
+            #     dy = 0
+            # elif is_land(lats_nuhf[j], lons_nuhf[im1]) or is_land(lats_nuhf[j], lons_nuhf[ip1]):
+            #     dx_j = 0
 
-            A[idx, idx - 1] = dy**2   # Coefficient of u(i-1,j)
-            A[idx, idx + 1] = dy**2   # Coefficient of u(i+1,j)
-            A[idx, idx - dm_m] = dx_j**2  # Coefficient of u(i,j-1)
-            A[idx, idx + dm_p] = dx_j**2  # Coefficient of u(i,j+1)
+            A[idx, idx - 1] = dx_j**2   # Coefficient of u(i-1,j)
+            A[idx, idx + 1] = dx_j**2   # Coefficient of u(i+1,j)
+            A[idx, idx - dm_m] = dy**2  # Coefficient of u(i,j-1)
+            A[idx, idx + dm_p] = dy**2  # Coefficient of u(i,j+1)
             A[idx, idx] = -2*(dx_j**2 + dy**2)  # Coefficient of u(i,j)
 
-            f[idx] = -(dx_j**2 * dy**2) * net_upward_heat_flux[j, i]
+            if is_land(lats_nuhf[j-1], lons_nuhf[i]):
+                A[idx, idx - 1] = 0            # Coefficient of u(i,j-1)
+
+            if is_land(lats_nuhf[j+1], lons_nuhf[i]):
+                A[idx, idx + 1] = 0            # Coefficient of u(i,j+1)
+
+            if is_land(lats_nuhf[j], lons_nuhf[im1]):
+                A[idx, idx - dm_m] = 0              # Coefficient of u(i-1,j)
+
+            if is_land(lats_nuhf[j], lons_nuhf[ip1]):
+                A[idx, idx + dm_p] = 0              # Coefficient of u(i+1,j)
+
+            # Set the source term to zero in the polar regions.
+            if np.abs(lats_nuhf[j]) > 80:
+                f[idx] = 0
+                net_upward_heat_flux[j, i] = 0
+            else:
+                f[idx] = -(dx_j**2 * dy**2) * net_upward_heat_flux[j, i]
 
             # A[idx, idx - 1] = 1 / dx_j ** 2  # Coefficient of u(i-1,j)
             # A[idx, idx + 1] = 1 / dx_j ** 2  # Coefficient of u(i+1,j)
