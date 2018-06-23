@@ -289,7 +289,7 @@ def solve_for_ocean_heat_transport_potential_cartesian():
 
     n_land_cells = 0
 
-    for j in np.arange(1, n - 1):
+    for j in np.arange(1, n-1):
         for i in np.arange(m):
             # Taking modulus of i-1 and i+1 to get the correct index in the special cases of
             #  * i=0 (180 W) and need to use the value from i=m (180 E)
@@ -297,8 +297,8 @@ def solve_for_ocean_heat_transport_potential_cartesian():
             im1 = (i - 1) % m
             ip1 = (i + 1) % m
 
-            dx_j = distance(lats_nuhf[j], lons_nuhf[0], lats_nuhf[j + 1], lons_nuhf[0])
-            dy = distance(lats_nuhf[j], lons_nuhf[0], lats_nuhf[j], lons_nuhf[1])
+            # dx_j = distance(lats_nuhf[j], lons_nuhf[0], lats_nuhf[j + 1], lons_nuhf[0])
+            # dy = distance(lats_nuhf[j], lons_nuhf[0], lats_nuhf[j], lons_nuhf[1])
 
             if is_land(lats_nuhf[j], lons_nuhf[i]):
                 n_land_cells = n_land_cells + 1
@@ -309,6 +309,13 @@ def solve_for_ocean_heat_transport_potential_cartesian():
 
             dm_m = int(idx_map[j*m + i] - idx_map[j*m + i - m])  # \Delta m_-: the index of the gridpoint above.
             dm_p = int(idx_map[j*m + i + m] - idx_map[j*m + i])  # \Delta m_+: the index of the gridpoint below.
+
+            # Impose no normal flow Neumann BC at the top.
+            if j == 1:
+                A[idx - 1, idx] = 1  # phi(i,0) == phi(i,1)
+
+            if j == n-2:
+                A[idx + 1, idx] = 1  # phi(i,n) == phi(i,n-1)
 
             # print('i={:}, j={:}, n={:}, j*m+i={:}, j*m+i-n={:}, j*m+i-m={:}, '
             #       'idx_map[j*m+i]={:}, idx_map[j*m+i-m]={:}, dm_m={:}, dm_p={:}'
@@ -328,7 +335,7 @@ def solve_for_ocean_heat_transport_potential_cartesian():
             # A[idx, idx] = -2 * (dx_j ** 2 + dy ** 2) / (dx_j ** 2 * dy ** 2)  # Coefficient of u(i,j)
             # f[idx] = -net_upward_heat_flux[j, i]
 
-            # This seems to lead to much faster convergence!
+            # # This seems to lead to much faster convergence!
             # A[idx, idx - 1] = dx_j**2   # Coefficient of u(i-1,j)
             # A[idx, idx + 1] = dx_j**2   # Coefficient of u(i+1,j)
             # A[idx, idx - dm_m] = dy**2  # Coefficient of u(i,j-1)
@@ -373,6 +380,60 @@ def solve_for_ocean_heat_transport_potential_cartesian():
             # else:
             #     f[idx] = -(dx_j**2 * dy**2) * net_upward_heat_flux[j, i]
 
+            """ Finite volume scheme """
+            # Some shorthand notation:
+            # im1  : i - 1      im12 : i - 1/2
+            # ip1  : i + 1      ip12 : i + 1/2
+            # jm1  : j - 1      jp12 : j + 1/2
+            # jp1  : j + 1      jm12 : j - 1/2
+
+            lat_ij, lon_ij = lats_nuhf[j], lons_nuhf[i]
+            delta_lat, delta_lon = lats_nuhf[1] - lats_nuhf[0], lons_nuhf[2] - lons_nuhf[1]
+
+            dy = distance(lats_nuhf[j], lons_nuhf[0], lats_nuhf[j+1], lons_nuhf[0])
+            dx_j = distance(lats_nuhf[j], lons_nuhf[1], lats_nuhf[j], lons_nuhf[2])
+            dx_jm12 = distance(lats_nuhf[j] - 0.5*delta_lat, lons_nuhf[1], lats_nuhf[j] - 0.5*delta_lat, lons_nuhf[2])
+            dx_jp12 = distance(lats_nuhf[j] + 0.5*delta_lat, lons_nuhf[1], lats_nuhf[j] + 0.5*delta_lat, lons_nuhf[2])
+
+            dx_ij = dx_j
+            dy_ij = dy
+            dx_ip12_j = dx_j
+            dx_im12_j = dx_j
+            dx_i_jp12 = dx_jp12
+            dx_i_jm12 = dx_jm12
+            dy_ip12_j = dy
+            dy_im12_j = dy
+            dy_i_jp12 = dy
+            dy_i_jm12 = dy
+
+            if is_land(lats_nuhf[j] - 0.5*delta_lat, lons_nuhf[i]):
+                dx_i_jm12 = 0
+
+            if is_land(lats_nuhf[j] + 0.5*delta_lat, lons_nuhf[i]):
+                dx_i_jp12 = 0
+            #
+            # if is_land(lats_nuhf[j], lons_nuhf[im1]):
+            #     dy_im12_j = 0
+            #
+            # if is_land(lats_nuhf[j], lons_nuhf[ip1]):
+            #     dy_ip12_j = 0
+
+            A[idx, idx - 1] = dy_im12_j / dx_im12_j     # Coefficient of u(i-1,j)
+            A[idx, idx + 1] = dy_ip12_j / dx_ip12_j     # Coefficient of u(i+1,j)
+            A[idx, idx - dm_m] = dx_i_jm12 / dy_i_jm12  # Coefficient of u(i,j-1)
+            A[idx, idx + dm_p] = dx_i_jp12 / dy_i_jp12  # Coefficient of u(i,j+1)
+
+            A[idx, idx] = - (dy_ip12_j/dx_ip12_j) - (dy_im12_j/dx_im12_j) \
+                          - (dx_i_jp12/dy_i_jp12) - (dx_i_jm12/dy_i_jm12)  # Coefficient of u(i,j)
+
+            # f[idx] = -(dx_ij * dy_ij) * net_upward_heat_flux[j, i]
+            if np.abs(lats_nuhf[j]) > 70:
+                # Set the source term to zero in the polar regions.
+                f[idx] = 0
+                net_upward_heat_flux[j, i] = 0
+            else:
+                f[idx] = -(dx_ij * dy_ij) * net_upward_heat_flux[j, i]
+
     logger.info('net_upward_heat_flux.shape={:}'.format(net_upward_heat_flux.shape))
     logger.info('A.shape={:}, f.shape={:}'.format(A.shape, f.shape))
     logger.info('m={:d}, n={:d}, m*n={:d}, m*n-N_land_cells={:d}'.format(m, n, m*n, m*n-N_land_cells))
@@ -383,7 +444,7 @@ def solve_for_ocean_heat_transport_potential_cartesian():
               .format(frame.f_locals['iter_'], frame.f_locals['resid'], frame.f_locals['info'], frame.f_locals['ndx1'],
                       frame.f_locals['ndx2'], frame.f_locals['sclr1'], frame.f_locals['sclr2'], frame.f_locals['ijob']))
 
-    u_no_land, _ = sparse_linalg.bicgstab(A, f, tol=1e-5, callback=report)
+    u_no_land, _ = sparse_linalg.bicgstab(A, f, tol=0.1, callback=report)
 
     # The potential is unique up to a constant, so we pick the "gauge" or normalization that it must integrate to zero.
     logger.info('Before normalization: sum(u_no_land)={:f}, mean(u_no_land)={:f}'
@@ -422,10 +483,10 @@ def solve_for_ocean_heat_transport_potential_cartesian():
 
     phi = np.reshape(u, (n, m))
 
-    # phi[:, 0] = phi[:, 1]
-    # phi[:, -1] = phi[:, -2]
-    phi[0, :] = phi[1, :]
-    phi[-1, :] = phi[-2, :]
+    phi[:, 0] = phi[:, 1]
+    phi[:, -1] = phi[:, -2]
+    # phi[0, :] = phi[1, :]
+    # phi[-1, :] = phi[-2, :]
 
     phi_x = np.zeros(phi.shape)
     phi_y = np.zeros(phi.shape)
@@ -438,8 +499,8 @@ def solve_for_ocean_heat_transport_potential_cartesian():
             im1 = (i - 1) % m
             ip1 = (i + 1) % m
 
-            dx_j = distance(lats_nuhf[j], lons_nuhf[0], lats_nuhf[j + 1], lons_nuhf[0])
-            dy = distance(lats_nuhf[j], lons_nuhf[0], lats_nuhf[j], lons_nuhf[1])
+            dx_j = distance(lats_nuhf[j], lons_nuhf[0], lats_nuhf[j], lons_nuhf[1])
+            dy = distance(lats_nuhf[j], lons_nuhf[0], lats_nuhf[j+1], lons_nuhf[0])
 
             if is_land(lats_nuhf[j], lons_nuhf[i]) \
                     or is_land(lats_nuhf[j-1], lons_nuhf[i]) or is_land(lats_nuhf[j+1], lons_nuhf[i]) \
@@ -487,8 +548,7 @@ def solve_for_ocean_heat_transport_potential_cartesian():
     ax.xaxis.set_major_formatter(lon_formatter)
     ax.yaxis.set_major_formatter(lat_formatter)
 
-    im = ax.contourf(lons_cyclic, lats_nuhf, phi / 1e15, transform=vector_crs, cmap=cm.get_cmap('PuOr', 15),
-                     vmin=np.min(phi/1e15), vmax=np.max(phi/1e15))
+    im = ax.contourf(lons_cyclic, lats_nuhf, phi / 1e15, 20, transform=vector_crs, cmap='PuOr')
 
     # m = plt.cm.ScalarMappable(cmap=cm.get_cmap('PuOr', 15))
     # m.set_array(phi)
