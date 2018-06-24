@@ -311,15 +311,21 @@ def solve_for_ocean_heat_transport_potential_cartesian():
             # idx = j * m + i
             idx = j*m + i - n_land_cells
 
-            dm_m = int(idx_map[j*m + i] - idx_map[j*m + i - m])  # \Delta m_-: the index of the gridpoint above.
-            dm_p = int(idx_map[j*m + i + m] - idx_map[j*m + i])  # \Delta m_+: the index of the gridpoint below.
+            dm_m = None  # \Delta m_-: subtract from idx to get the index of the gridpoint below, i.e. (j-1, i).
+            dm_p = None  # \Delta m_+: add to idx to get the index of the gridpoint above, i.e. (j+1, i).
+
+            if j > 0:
+                dm_m = int(idx_map[j*m + i] - idx_map[j*m + i - m])
+
+            if j < n-1:
+                dm_p = int(idx_map[j*m + i + m] - idx_map[j*m + i])
 
             # Impose no normal flow Neumann BC at the top.
-            if j == 1:
-                A[idx - 1, idx] = 1  # phi(i,0) == phi(i,1)
-
-            if j == n-2:
-                A[idx + 1, idx] = 1  # phi(i,n) == phi(i,n-1)
+            # if j == 1:
+            #     A[idx - 1, idx] = 1  # phi(i,0) == phi(i,1)
+            #
+            # if j == n-2:
+            #     A[idx + 1, idx] = 1  # phi(i,n) == phi(i,n-1)
 
             # print('i={:}, j={:}, n={:}, j*m+i={:}, j*m+i-n={:}, j*m+i-m={:}, '
             #       'idx_map[j*m+i]={:}, idx_map[j*m+i-m]={:}, dm_m={:}, dm_p={:}'
@@ -410,33 +416,69 @@ def solve_for_ocean_heat_transport_potential_cartesian():
             dy_i_jp12 = dy
             dy_i_jm12 = dy
 
-            if is_land(lats_nuhf[j] - 0.5*delta_lat, lons_nuhf[i]):
-                dx_i_jm12 = 0
-
-            if is_land(lats_nuhf[j] + 0.5*delta_lat, lons_nuhf[i]):
-                dx_i_jp12 = 0
+            # if is_land(lats_nuhf[j] - 0.5*delta_lat, lons_nuhf[i]):
+            #     dx_i_jm12 = 0
+            #     # dy_im12_j = 0
+            #
+            # if is_land(lats_nuhf[j] + 0.5*delta_lat, lons_nuhf[i]):
+            #     dx_i_jp12 = 0
+            #     # dy_ip12_j = 0
             #
             # if is_land(lats_nuhf[j], lons_nuhf[im1]):
             #     dy_im12_j = 0
+            #     # dx_i_jm12 = 0
             #
             # if is_land(lats_nuhf[j], lons_nuhf[ip1]):
             #     dy_ip12_j = 0
+            #     # dx_i_jp12 = 0
 
-            A[idx, idx - 1] = dy_im12_j / dx_im12_j     # Coefficient of u(i-1,j)
-            A[idx, idx + 1] = dy_ip12_j / dx_ip12_j     # Coefficient of u(i+1,j)
-            A[idx, idx - dm_m] = dx_i_jm12 / dy_i_jm12  # Coefficient of u(i,j-1)
-            A[idx, idx + dm_p] = dx_i_jp12 / dy_i_jp12  # Coefficient of u(i,j+1)
-
-            A[idx, idx] = - (dy_ip12_j/dx_ip12_j) - (dy_im12_j/dx_im12_j) \
-                          - (dx_i_jp12/dy_i_jp12) - (dx_i_jm12/dy_i_jm12)  # Coefficient of u(i,j)
-
-            # f[idx] = -(dx_ij * dy_ij) * net_upward_heat_flux[j, i]
-            if np.abs(lats_nuhf[j]) > 70:
-                # Set the source term to zero in the polar regions.
+            if j == 0:
+                # Setting phi(i,0) = phi(i,1)
+                A[idx, idx] = 1
+                A[idx, idx + dm_p] = -1
                 f[idx] = 0
-                net_upward_heat_flux[j, i] = 0
+
+                # A[idx, idx - 1] = dy_im12_j / dx_im12_j  # Coefficient of u(i-1,j)
+                # A[idx, idx + 1] = dy_ip12_j / dx_ip12_j  # Coefficient of u(i+1,j)
+                # A[idx, idx - dm_m] = dx_i_jm12 / dy_i_jm12  # Coefficient of u(i,j-1)
+                #
+                # A[idx, idx] = - (dy_ip12_j / dx_ip12_j) - (dy_im12_j / dx_im12_j) \
+                #               - (dx_i_jp12 / dy_i_jp12) - (dx_i_jm12 / dy_i_jm12)  # Coefficient of u(i,j)
+
+            elif j == n-1:
+                # Setting phi(i,n-1) = phi(i,n-2)
+                A[idx, idx] = 1
+                A[idx, idx - dm_m] = -1
+                f[idx] = 0
+
+                # A[idx, idx - 1] = dy_im12_j / dx_im12_j  # Coefficient of u(i-1,j)
+                # A[idx, idx - dm_m] = dx_i_jm12 / dy_i_jm12  # Coefficient of u(i,j-1)
+                #
+                # # Cell (m, n-1) does not exist.
+                # if i < m-1:
+                #     A[idx, idx + 1] = dy_ip12_j / dx_ip12_j  # Coefficient of u(i+1,j)
+                #     A[idx, idx] = - (dy_ip12_j / dx_ip12_j) - (dy_im12_j / dx_im12_j) \
+                #                   - (dx_i_jm12 / dy_i_jm12)  # Coefficient of u(i,j)
+                # else:
+                #     A[idx, idx] = - (dy_im12_j / dx_im12_j) - (dx_i_jm12 / dy_i_jm12)  # Coefficient of u(i,j)
+
             else:
+                A[idx, idx - 1] = dy_im12_j / dx_im12_j  # Coefficient of u(i-1,j)
+                A[idx, idx + 1] = dy_ip12_j / dx_ip12_j  # Coefficient of u(i+1,j)
+                A[idx, idx - dm_m] = dx_i_jm12 / dy_i_jm12  # Coefficient of u(i,j-1)
+                A[idx, idx + dm_p] = dx_i_jp12 / dy_i_jp12  # Coefficient of u(i,j+1)
+
+                A[idx, idx] = - (dy_ip12_j / dx_ip12_j) - (dy_im12_j / dx_im12_j) \
+                              - (dx_i_jp12 / dy_i_jp12) - (dx_i_jm12 / dy_i_jm12)  # Coefficient of u(i,j)
+
                 f[idx] = -(dx_ij * dy_ij) * net_upward_heat_flux[j, i]
+
+                # if np.abs(lats_nuhf[j]) > 75:
+                #     # Set the source term to zero in the polar regions.
+                #     f[idx] = 0
+                #     net_upward_heat_flux[j, i] = 0
+                # else:
+                #     f[idx] = -(dx_ij * dy_ij) * net_upward_heat_flux[j, i]
 
     logger.info('net_upward_heat_flux.shape={:}'.format(net_upward_heat_flux.shape))
     logger.info('A.shape={:}, f.shape={:}'.format(A.shape, f.shape))
