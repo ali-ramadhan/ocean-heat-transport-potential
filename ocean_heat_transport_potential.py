@@ -237,6 +237,10 @@ def solve_for_ocean_heat_transport_potential_cartesian():
     lons_nuhf = np.array(nuhf_dataset.variables['X'])
     net_upward_heat_flux = np.array(nuhf_dataset.variables['asum'])
 
+    # Remove the 90 N and 90 S rows.
+    lats_nuhf = lats_nuhf[1:-1]
+    net_upward_heat_flux = net_upward_heat_flux[1:-1, :]
+
     m, n = lons_nuhf.size, lats_nuhf.size
 
     # Setting net upward flux to zero over land.
@@ -246,26 +250,7 @@ def solve_for_ocean_heat_transport_potential_cartesian():
             if is_land(lat, lon):
                 net_upward_heat_flux[i, j] = 0
 
-    # Count the number of land points.
-    N_land_cells = 0
-    for j in np.arange(1, n - 1):
-        for i in np.arange(m):
-            lat, lon = lats_nuhf[j], lons_nuhf[i]
-            if is_land(lat, lon):
-                N_land_cells = N_land_cells + 1
-
-    logger.info('N_land_cells={:d}'.format(N_land_cells))
-
-    idx_map = np.zeros((m*n, 1))
-    n_land_cells = 0
-    for j in np.arange(1, n - 1):
-        for i in np.arange(m):
-            lat, lon = lats_nuhf[j], lons_nuhf[i]
-            if is_land(lat, lon):
-                n_land_cells = n_land_cells + 1
-            idx_map[j*m + i] = j * m + i - n_land_cells
-
-    # Normalize array to integrate to zero, to satisfy the compatibility condition.
+    # Normalize source term to integrate to zero, to satisfy the Poisson equation compatibility condition.
     logger.info('Before normalization: sum={:f}, mean={:f}'
                 .format(np.sum(net_upward_heat_flux), np.mean(net_upward_heat_flux)))
 
@@ -274,22 +259,41 @@ def solve_for_ocean_heat_transport_potential_cartesian():
     logger.info('After normalization: sum={:f}, mean={:f}'
                 .format(np.sum(net_upward_heat_flux), np.mean(net_upward_heat_flux)))
 
-    # lons_nuhf = np.append(lons_nuhf[97:], lons_nuhf[0:97])
-    # net_upward_heat_flux = np.append(net_upward_heat_flux[:, 97:], net_upward_heat_flux[:, 0:97], axis=1)
+    # Count the number of land points.
+    N_land_cells = 0
+    for j in np.arange(n):
+        for i in np.arange(m):
+            lat, lon = lats_nuhf[j], lons_nuhf[i]
+            if is_land(lat, lon):
+                N_land_cells = N_land_cells + 1
+
+    logger.info('m*n={:d}, N_land_cells={:d}, m*n-N={:d}'.format(m*n, N_land_cells, m*n-N_land_cells))
+
+    # Create 1D map that maps the cell (i,j)'s index  j*m + i on the grid including land to the index
+    # j*m + i - n_land_cells on the grid excluding land points, where n_land_cells is the number of land cells
+    # encountered so far.
+    idx_map = np.zeros((m*n, 1))
+    n_land_cells = 0
+    for j in np.arange(n):
+        for i in np.arange(m):
+            lat, lon = lats_nuhf[j], lons_nuhf[i]
+            if is_land(lat, lon):
+                n_land_cells = n_land_cells + 1
+            idx_map[j*m + i] = j * m + i - n_land_cells
 
     plot_scalar_field(lats_nuhf, lons_nuhf, net_upward_heat_flux, cmap=cmocean.cm.balance, vmin=-150, vmax=150)
 
     # Setting up the linear system A*u = f for the discretized Poisson equation.
     # A = sparse.lil_matrix((m*n, m*n))
 
-    # A = np.zeros((m * n, m * n))
-    # f = np.zeros((m * n, 1))
+    # We just need set up the discretized Poisson equation over ocean cells.
     A = sparse.lil_matrix((m * n - N_land_cells, m * n - N_land_cells))
     f = np.zeros((m * n - N_land_cells, 1))
 
-    n_land_cells = 0
+    n_land_cells = 0  # Number of land cells iterated over so far.
 
-    for j in np.arange(1, n-1):
+    for j in np.arange(n):
+        logger.info('j={:d}, lat={:f}'.format(j, lats_nuhf[j]))
         for i in np.arange(m):
             # Taking modulus of i-1 and i+1 to get the correct index in the special cases of
             #  * i=0 (180 W) and need to use the value from i=m (180 E)
@@ -390,7 +394,7 @@ def solve_for_ocean_heat_transport_potential_cartesian():
             lat_ij, lon_ij = lats_nuhf[j], lons_nuhf[i]
             delta_lat, delta_lon = lats_nuhf[1] - lats_nuhf[0], lons_nuhf[2] - lons_nuhf[1]
 
-            dy = distance(lats_nuhf[j], lons_nuhf[0], lats_nuhf[j+1], lons_nuhf[0])
+            dy = distance(lats_nuhf[j] - 0.5*delta_lat, lons_nuhf[0], lats_nuhf[j] + 0.5*delta_lat, lons_nuhf[0])
             dx_j = distance(lats_nuhf[j], lons_nuhf[1], lats_nuhf[j], lons_nuhf[2])
             dx_jm12 = distance(lats_nuhf[j] - 0.5*delta_lat, lons_nuhf[1], lats_nuhf[j] - 0.5*delta_lat, lons_nuhf[2])
             dx_jp12 = distance(lats_nuhf[j] + 0.5*delta_lat, lons_nuhf[1], lats_nuhf[j] + 0.5*delta_lat, lons_nuhf[2])
@@ -458,7 +462,7 @@ def solve_for_ocean_heat_transport_potential_cartesian():
     # Add the land cells back in.
     u = np.zeros((m*n, 1))
     n_land_cells = 0
-    for j in np.arange(1, n - 1):
+    for j in np.arange(n):
         for i in np.arange(m):
             lat, lon = lats_nuhf[j], lons_nuhf[i]
             if is_land(lat, lon):
@@ -483,15 +487,15 @@ def solve_for_ocean_heat_transport_potential_cartesian():
 
     phi = np.reshape(u, (n, m))
 
-    phi[:, 0] = phi[:, 1]
-    phi[:, -1] = phi[:, -2]
+    # phi[:, 0] = phi[:, 1]
+    # phi[:, -1] = phi[:, -2]
     # phi[0, :] = phi[1, :]
     # phi[-1, :] = phi[-2, :]
 
     phi_x = np.zeros(phi.shape)
     phi_y = np.zeros(phi.shape)
 
-    for j in np.arange(1, n - 1):
+    for j in np.arange(1, n-1):
         for i in np.arange(m):
             # Taking modulus of i-1 and i+1 to get the correct index in the special cases of
             #  * i=0 (180 W) and need to use the value from i=m (180 E)
@@ -548,7 +552,7 @@ def solve_for_ocean_heat_transport_potential_cartesian():
     ax.xaxis.set_major_formatter(lon_formatter)
     ax.yaxis.set_major_formatter(lat_formatter)
 
-    im = ax.contourf(lons_cyclic, lats_nuhf, phi / 1e15, 20, transform=vector_crs, cmap='PuOr')
+    im = ax.contourf(lons_cyclic, lats_nuhf, phi / 1e15, 50, transform=vector_crs, cmap='PuOr')
 
     # m = plt.cm.ScalarMappable(cmap=cm.get_cmap('PuOr', 15))
     # m.set_array(phi)
