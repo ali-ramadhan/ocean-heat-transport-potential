@@ -281,6 +281,14 @@ def solve_for_ocean_heat_transport_potential_cartesian():
                 n_land_cells = n_land_cells + 1
             idx_map[j*m + i] = j * m + i - n_land_cells
 
+    # Create map of the two southmost cells at each longitude for the purposes of setting boundary conditions.
+    idx_southmost = np.zeros((m, 1))
+    for i in np.arange(m):
+        for j in np.arange(n-1, -1, -1):
+            lat, lon = lats_nuhf[j], lons_nuhf[i]
+            if not is_land(lat, lon):
+                idx_southmost[i] = j
+
     plot_scalar_field(lats_nuhf, lons_nuhf, net_upward_heat_flux, cmap=cmocean.cm.balance, vmin=-150, vmax=150)
 
     # Setting up the linear system A*u = f for the discretized Poisson equation.
@@ -432,11 +440,19 @@ def solve_for_ocean_heat_transport_potential_cartesian():
             #     dy_ip12_j = 0
             #     # dx_i_jp12 = 0
 
-            if j == 0:
+            if j == idx_southmost[i]:
                 # Setting phi(i,0) = phi(i,1)
                 A[idx, idx] = 1
                 A[idx, idx + dm_p] = -1
                 f[idx] = 0
+                continue
+
+            if j == 0:
+                pass
+                # Setting phi(i,0) = phi(i,1)
+                # A[idx, idx] = 1
+                # A[idx, idx + dm_p] = -1
+                # f[idx] = 0
 
                 # A[idx, idx - 1] = dy_im12_j / dx_im12_j  # Coefficient of u(i-1,j)
                 # A[idx, idx + 1] = dy_ip12_j / dx_ip12_j  # Coefficient of u(i+1,j)
