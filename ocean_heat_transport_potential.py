@@ -431,38 +431,37 @@ def solve_for_ocean_heat_transport_potential_cartesian():
             # if is_land(lats_nuhf[j] + 0.5*delta_lat, lons_nuhf[i]):
             #     dx_i_jp12 = 0
             #     # dy_ip12_j = 0
+
+            if is_land(lats_nuhf[j], lons_nuhf[im1]):
+                dy_im12_j = 0
+                # dx_i_jm12 = 0
+
+            if is_land(lats_nuhf[j], lons_nuhf[ip1]):
+                dy_ip12_j = 0
+                # dx_i_jp12 = 0
+
+            # if j == 0:
+            #     pass
+            #     # Setting phi(i,0) = phi(i,1)
+            #     # A[idx, idx] = 1
+            #     # A[idx, idx + dm_p] = -1
+            #     # f[idx] = 0
             #
-            # if is_land(lats_nuhf[j], lons_nuhf[im1]):
-            #     dy_im12_j = 0
-            #     # dx_i_jm12 = 0
-            #
-            # if is_land(lats_nuhf[j], lons_nuhf[ip1]):
-            #     dy_ip12_j = 0
-            #     # dx_i_jp12 = 0
+            #     # A[idx, idx - 1] = dy_im12_j / dx_im12_j  # Coefficient of u(i-1,j)
+            #     # A[idx, idx + 1] = dy_ip12_j / dx_ip12_j  # Coefficient of u(i+1,j)
+            #     # A[idx, idx - dm_m] = dx_i_jm12 / dy_i_jm12  # Coefficient of u(i,j-1)
+            #     #
+            #     # A[idx, idx] = - (dy_ip12_j / dx_ip12_j) - (dy_im12_j / dx_im12_j) \
+            #     #               - (dx_i_jp12 / dy_i_jp12) - (dx_i_jm12 / dy_i_jm12)  # Coefficient of u(i,j)
 
             if j == idx_southmost[i]:
-                # Setting phi(i,0) = phi(i,1)
+                # Setting phi(i,0) = phi(i,1) at southern boundary
                 A[idx, idx] = 1
                 A[idx, idx + dm_p] = -1
                 f[idx] = 0
-                continue
-
-            if j == 0:
-                pass
-                # Setting phi(i,0) = phi(i,1)
-                # A[idx, idx] = 1
-                # A[idx, idx + dm_p] = -1
-                # f[idx] = 0
-
-                # A[idx, idx - 1] = dy_im12_j / dx_im12_j  # Coefficient of u(i-1,j)
-                # A[idx, idx + 1] = dy_ip12_j / dx_ip12_j  # Coefficient of u(i+1,j)
-                # A[idx, idx - dm_m] = dx_i_jm12 / dy_i_jm12  # Coefficient of u(i,j-1)
-                #
-                # A[idx, idx] = - (dy_ip12_j / dx_ip12_j) - (dy_im12_j / dx_im12_j) \
-                #               - (dx_i_jp12 / dy_i_jp12) - (dx_i_jm12 / dy_i_jm12)  # Coefficient of u(i,j)
 
             elif j == n-1:
-                # Setting phi(i,n-1) = phi(i,n-2)
+                # Setting phi(i,n-1) = phi(i,n-2) at northern boundary
                 A[idx, idx] = 1
                 A[idx, idx - dm_m] = -1
                 f[idx] = 0
@@ -506,7 +505,8 @@ def solve_for_ocean_heat_transport_potential_cartesian():
               .format(frame.f_locals['iter_'], frame.f_locals['resid'], frame.f_locals['info'], frame.f_locals['ndx1'],
                       frame.f_locals['ndx2'], frame.f_locals['sclr1'], frame.f_locals['sclr2'], frame.f_locals['ijob']))
 
-    u_no_land, _ = sparse_linalg.bicgstab(A, f, tol=0.1, callback=report)
+    u_no_land, _ = sparse_linalg.bicgstab(A, f, tol=0.15, callback=report)
+    # u_no_land = sparse_linalg.spsolve(A, f, use_umfpack=True)
 
     # The potential is unique up to a constant, so we pick the "gauge" or normalization that it must integrate to zero.
     logger.info('Before normalization: sum(u_no_land)={:f}, mean(u_no_land)={:f}'
