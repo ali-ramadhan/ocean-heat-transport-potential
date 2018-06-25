@@ -494,8 +494,17 @@ def solve_for_ocean_heat_transport_potential_cartesian():
               .format(frame.f_locals['iter_'], frame.f_locals['resid'], frame.f_locals['info'], frame.f_locals['ndx1'],
                       frame.f_locals['ndx2'], frame.f_locals['sclr1'], frame.f_locals['sclr2'], frame.f_locals['ijob']))
 
-    u_no_land, _ = sparse_linalg.bicgstab(A, f, tol=0.15, callback=report)
-    # u_no_land = sparse_linalg.spsolve(A, f, use_umfpack=True)
+    P = sparse.lil_matrix((m*n - N_land_cells, m*n - N_land_cells))
+
+    # Jacobi preconditioner matrix P. Could be effective in our case as our A matrix is (just barely!)
+    # diagonally dominant. It actually helps quite a bit!
+    for i in np.arange(m*n - N_land_cells):
+        P[i, i] = 1 / A[i, i]
+
+    # We try using two iterative solvers for sparse nonsymmetric linear systems, the
+    # BIConjugate Gradient STABilized iteration (bicgstab) and the Generalized Minimal RESidual iteration (GMRES).
+    # u_no_land, _ = sparse_linalg.bicgstab(A, f, M=P, tol=0.01, callback=report)
+    u_no_land, _ = sparse_linalg.gmres(A, f, M=P, tol=0.018, callback=report)
 
     # The potential is unique up to a constant, so we pick the "gauge" or normalization that it must integrate to zero.
     logger.info('Before normalization: sum(u_no_land)={:f}, mean(u_no_land)={:f}'
