@@ -309,14 +309,10 @@ def solve_for_ocean_heat_transport_potential_cartesian():
             im1 = (i - 1) % m
             ip1 = (i + 1) % m
 
-            # dx_j = distance(lats_nuhf[j], lons_nuhf[0], lats_nuhf[j + 1], lons_nuhf[0])
-            # dy = distance(lats_nuhf[j], lons_nuhf[0], lats_nuhf[j], lons_nuhf[1])
-
             if is_land(lats_nuhf[j], lons_nuhf[i]):
                 n_land_cells = n_land_cells + 1
                 continue
 
-            # idx = j * m + i
             idx = j*m + i - n_land_cells
 
             dm_m = None  # \Delta m_-: subtract from idx to get the index of the gridpoint below, i.e. (j-1, i).
@@ -346,37 +342,55 @@ def solve_for_ocean_heat_transport_potential_cartesian():
             #     dx_j = 0
 
             """ Finite centered-difference scheme """
-            # A[idx, idx - 1] = 1 / dx_j ** 2  # Coefficient of u(i-1,j)
-            # A[idx, idx + 1] = 1 / dx_j ** 2  # Coefficient of u(i+1,j)
-            # A[idx, idx - dm_m] = 1 / dy ** 2  # Coefficient of u(i,j-1)
-            # A[idx, idx + dm_p] = 1 / dy ** 2  # Coefficient of u(i,j+1)
-            # A[idx, idx] = -2 * (dx_j ** 2 + dy ** 2) / (dx_j ** 2 * dy ** 2)  # Coefficient of u(i,j)
-            # f[idx] = -net_upward_heat_flux[j, i]
-
-            # # This seems to lead to much faster convergence!
-            # A[idx, idx - 1] = dx_j**2   # Coefficient of u(i-1,j)
-            # A[idx, idx + 1] = dx_j**2   # Coefficient of u(i+1,j)
-            # A[idx, idx - dm_m] = dy**2  # Coefficient of u(i,j-1)
-            # A[idx, idx + dm_p] = dy**2  # Coefficient of u(i,j+1)
-            # A[idx, idx] = -2*(dx_j**2 + dy**2)  # Coefficient of u(i,j)
-
-            # Incorperate Neumann boundary condition at continental boundaries for grid points beside land.
-            # Didn't seem to work =/
-            # if is_land(lats_nuhf[j-1], lons_nuhf[i]):
-            #     A[idx, idx - dm_m] = 0            # Coefficient of u(i,j-1)
-            #     A[idx, idx + dm_p] = 2 / (dy**2)  # Coefficient of u(i,j+1)
+            # delta_lat, delta_lon = lats_nuhf[1] - lats_nuhf[0], lons_nuhf[2] - lons_nuhf[1]
             #
-            # if is_land(lats_nuhf[j+1], lons_nuhf[i]):
-            #     A[idx, idx - dm_m] = 2 / (dy**2)  # Coefficient of u(i,j-1)
-            #     A[idx, idx + dm_p] = 0            # Coefficient of u(i,j+1)
+            # dy = distance(lats_nuhf[j] - 0.5*delta_lat, lons_nuhf[0], lats_nuhf[j] + 0.5*delta_lat, lons_nuhf[0])
+            # dx_j = distance(lats_nuhf[j], lons_nuhf[1], lats_nuhf[j], lons_nuhf[2])
             #
-            # if is_land(lats_nuhf[j], lons_nuhf[im1]):
-            #     A[idx, idx - 1] = 0              # Coefficient of u(i-1,j)
-            #     A[idx, idx + 1] = 2 / (dx_j**2)  # Coefficient of u(i+1,j)
+            # # A[idx, idx - 1] = 1 / dx_j ** 2  # Coefficient of u(i-1,j)
+            # # A[idx, idx + 1] = 1 / dx_j ** 2  # Coefficient of u(i+1,j)
+            # # A[idx, idx - dm_m] = 1 / dy ** 2  # Coefficient of u(i,j-1)
+            # # A[idx, idx + dm_p] = 1 / dy ** 2  # Coefficient of u(i,j+1)
+            # # A[idx, idx] = -2 * (dx_j ** 2 + dy ** 2) / (dx_j ** 2 * dy ** 2)  # Coefficient of u(i,j)
+            # # f[idx] = -net_upward_heat_flux[j, i]
             #
-            # if is_land(lats_nuhf[j], lons_nuhf[ip1]):
-            #     A[idx, idx - 1] = 2 / (dx_j**2)  # Coefficient of u(i-1,j)
-            #     A[idx, idx + 1] = 0              # Coefficient of u(i+1,j)
+            # if j == idx_southmost[i]:
+            #     # Setting phi(i,0) = phi(i,1) at southern boundary
+            #     A[idx, idx] = 1
+            #     A[idx, idx + dm_p] = -1
+            #     f[idx] = 0
+            #
+            # elif j == n-1:
+            #     # Setting phi(i,n-1) = phi(i,n-2) at northern boundary
+            #     A[idx, idx] = 1
+            #     A[idx, idx - dm_m] = -1
+            #     f[idx] = 0
+            #
+            # else:
+            #     # This seems to lead to much faster convergence!
+            #     A[idx, idx - 1] = dx_j**2   # Coefficient of u(i-1,j)
+            #     A[idx, idx + 1] = dx_j**2   # Coefficient of u(i+1,j)
+            #     A[idx, idx - dm_m] = dy**2  # Coefficient of u(i,j-1)
+            #     A[idx, idx + dm_p] = dy**2  # Coefficient of u(i,j+1)
+            #     A[idx, idx] = -2*(dx_j**2 + dy**2)  # Coefficient of u(i,j)
+            #
+            #     # Incorperate Neumann boundary condition at continental boundaries for grid points beside land.
+            #     # Didn't seem to work =/
+            #     if is_land(lats_nuhf[j-1], lons_nuhf[i]):
+            #         A[idx, idx - dm_m] = 0            # Coefficient of u(i,j-1)
+            #         A[idx, idx + dm_p] = 2 / (dy**2)  # Coefficient of u(i,j+1)
+            #
+            #     if is_land(lats_nuhf[j+1], lons_nuhf[i]):
+            #         A[idx, idx - dm_m] = 2 / (dy**2)  # Coefficient of u(i,j-1)
+            #         A[idx, idx + dm_p] = 0            # Coefficient of u(i,j+1)
+            #
+            #     if is_land(lats_nuhf[j], lons_nuhf[im1]):
+            #         A[idx, idx - 1] = 0              # Coefficient of u(i-1,j)
+            #         A[idx, idx + 1] = 2 / (dx_j**2)  # Coefficient of u(i+1,j)
+            #
+            #     if is_land(lats_nuhf[j], lons_nuhf[ip1]):
+            #         A[idx, idx - 1] = 2 / (dx_j**2)  # Coefficient of u(i-1,j)
+            #         A[idx, idx + 1] = 0              # Coefficient of u(i+1,j)
 
             # Don't think this is the correct way of imposing boundary conditions...
             # if is_land(lats_nuhf[j-1], lons_nuhf[i]):
@@ -431,28 +445,14 @@ def solve_for_ocean_heat_transport_potential_cartesian():
             # if is_land(lats_nuhf[j] + 0.5*delta_lat, lons_nuhf[i]):
             #     dx_i_jp12 = 0
             #     # dy_ip12_j = 0
-
-            if is_land(lats_nuhf[j], lons_nuhf[im1]):
-                dy_im12_j = 0
-                # dx_i_jm12 = 0
-
-            if is_land(lats_nuhf[j], lons_nuhf[ip1]):
-                dy_ip12_j = 0
-                # dx_i_jp12 = 0
-
-            # if j == 0:
-            #     pass
-            #     # Setting phi(i,0) = phi(i,1)
-            #     # A[idx, idx] = 1
-            #     # A[idx, idx + dm_p] = -1
-            #     # f[idx] = 0
             #
-            #     # A[idx, idx - 1] = dy_im12_j / dx_im12_j  # Coefficient of u(i-1,j)
-            #     # A[idx, idx + 1] = dy_ip12_j / dx_ip12_j  # Coefficient of u(i+1,j)
-            #     # A[idx, idx - dm_m] = dx_i_jm12 / dy_i_jm12  # Coefficient of u(i,j-1)
-            #     #
-            #     # A[idx, idx] = - (dy_ip12_j / dx_ip12_j) - (dy_im12_j / dx_im12_j) \
-            #     #               - (dx_i_jp12 / dy_i_jp12) - (dx_i_jm12 / dy_i_jm12)  # Coefficient of u(i,j)
+            # if is_land(lats_nuhf[j], lons_nuhf[im1]):
+            #     dy_im12_j = 0
+            #     # dx_i_jm12 = 0
+            #
+            # if is_land(lats_nuhf[j], lons_nuhf[ip1]):
+            #     dy_ip12_j = 0
+            #     # dx_i_jp12 = 0
 
             if j == idx_southmost[i]:
                 # Setting phi(i,0) = phi(i,1) at southern boundary
@@ -465,17 +465,6 @@ def solve_for_ocean_heat_transport_potential_cartesian():
                 A[idx, idx] = 1
                 A[idx, idx - dm_m] = -1
                 f[idx] = 0
-
-                # A[idx, idx - 1] = dy_im12_j / dx_im12_j  # Coefficient of u(i-1,j)
-                # A[idx, idx - dm_m] = dx_i_jm12 / dy_i_jm12  # Coefficient of u(i,j-1)
-                #
-                # # Cell (m, n-1) does not exist.
-                # if i < m-1:
-                #     A[idx, idx + 1] = dy_ip12_j / dx_ip12_j  # Coefficient of u(i+1,j)
-                #     A[idx, idx] = - (dy_ip12_j / dx_ip12_j) - (dy_im12_j / dx_im12_j) \
-                #                   - (dx_i_jm12 / dy_i_jm12)  # Coefficient of u(i,j)
-                # else:
-                #     A[idx, idx] = - (dy_im12_j / dx_im12_j) - (dx_i_jm12 / dy_i_jm12)  # Coefficient of u(i,j)
 
             else:
                 A[idx, idx - 1] = dy_im12_j / dx_im12_j  # Coefficient of u(i-1,j)
