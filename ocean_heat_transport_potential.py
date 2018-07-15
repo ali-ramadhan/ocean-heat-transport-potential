@@ -259,13 +259,16 @@ def solve_for_ocean_heat_transport_potential_cartesian():
     logger.info('After normalization: sum={:f}, mean={:f}'
                 .format(np.sum(net_upward_heat_flux), np.mean(net_upward_heat_flux)))
 
-    # Count the number of land points.
+    # Count the number of land points and create land mask for plotting purposes.
+    land_mask = np.zeros(net_upward_heat_flux.shape, dtype=bool)
     N_land_cells = 0
+
     for j in np.arange(n):
         for i in np.arange(m):
             lat, lon = lats_nuhf[j], lons_nuhf[i]
             if is_land(lat, lon):
                 N_land_cells = N_land_cells + 1
+                land_mask[j, i] = True
 
     logger.info('m*n={:d}, N_land_cells={:d}, m*n-N={:d}'.format(m*n, N_land_cells, m*n-N_land_cells))
 
@@ -355,17 +358,24 @@ def solve_for_ocean_heat_transport_potential_cartesian():
             # # f[idx] = -net_upward_heat_flux[j, i]
             #
             # if j == idx_southmost[i]:
-            #     # Setting phi(i,0) = phi(i,1) at southern boundary
-            #     A[idx, idx] = 1
-            #     A[idx, idx + dm_p] = -1
-            #     f[idx] = 0
-            #
+            #     # # Setting phi(i,0) = phi(i,1) at southern boundary
+            #     # A[idx, idx] = 1
+            #     # A[idx, idx + dm_p] = -1
+            #     # f[idx] = 0
+            #     A[idx, idx - 1] = dx_j**2   # Coefficient of u(i-1,j)
+            #     A[idx, idx + 1] = dx_j**2   # Coefficient of u(i+1,j)
+            #     A[idx, idx - dm_m] = dy**2  # Coefficient of u(i,j-1)
+            #     A[idx, idx] = -2*(dx_j**2 + dy**2)  # Coefficient of u(i,j)
             # elif j == n-1:
-            #     # Setting phi(i,n-1) = phi(i,n-2) at northern boundary
-            #     A[idx, idx] = 1
-            #     A[idx, idx - dm_m] = -1
-            #     f[idx] = 0
-            #
+            #     # # Setting phi(i,n-1) = phi(i,n-2) at northern boundary
+            #     # A[idx, idx] = 1
+            #     # A[idx, idx - dm_m] = -1
+            #     # f[idx] = 0
+            #     A[idx, idx - 1] = dx_j**2   # Coefficient of u(i-1,j)
+            #     A[idx, idx - dm_m] = dy**2  # Coefficient of u(i,j-1)
+            #     A[idx, idx] = -2*(dx_j**2 + dy**2)  # Coefficient of u(i,j)
+            #     if i != m-1:
+            #         A[idx, idx + 1] = dx_j ** 2  # Coefficient of u(i+1,j)
             # else:
             #     # This seems to lead to much faster convergence!
             #     A[idx, idx - 1] = dx_j**2   # Coefficient of u(i-1,j)
@@ -374,43 +384,45 @@ def solve_for_ocean_heat_transport_potential_cartesian():
             #     A[idx, idx + dm_p] = dy**2  # Coefficient of u(i,j+1)
             #     A[idx, idx] = -2*(dx_j**2 + dy**2)  # Coefficient of u(i,j)
             #
-            #     # Incorperate Neumann boundary condition at continental boundaries for grid points beside land.
-            #     # Didn't seem to work =/
-            #     if is_land(lats_nuhf[j-1], lons_nuhf[i]):
-            #         A[idx, idx - dm_m] = 0            # Coefficient of u(i,j-1)
-            #         A[idx, idx + dm_p] = 2 / (dy**2)  # Coefficient of u(i,j+1)
+            # # Incorperate Neumann boundary condition at continental boundaries for grid points beside land.
+            # # Didn't seem to work =/
+            # # if is_land(lats_nuhf[j-1], lons_nuhf[i]):
+            # #     A[idx, idx - dm_m] = 0            # Coefficient of u(i,j-1)
+            # #     A[idx, idx + dm_p] = 2 / (dy**2)  # Coefficient of u(i,j+1)
+            # #
+            # # if is_land(lats_nuhf[j+1], lons_nuhf[i]):
+            # #     A[idx, idx - dm_m] = 2 / (dy**2)  # Coefficient of u(i,j-1)
+            # #     A[idx, idx + dm_p] = 0            # Coefficient of u(i,j+1)
+            # #
+            # # if is_land(lats_nuhf[j], lons_nuhf[im1]):
+            # #     A[idx, idx - 1] = 0              # Coefficient of u(i-1,j)
+            # #     A[idx, idx + 1] = 2 / (dx_j**2)  # Coefficient of u(i+1,j)
+            # #
+            # # if is_land(lats_nuhf[j], lons_nuhf[ip1]):
+            # #     A[idx, idx - 1] = 2 / (dx_j**2)  # Coefficient of u(i-1,j)
+            # #     A[idx, idx + 1] = 0              # Coefficient of u(i+1,j)
             #
-            #     if is_land(lats_nuhf[j+1], lons_nuhf[i]):
-            #         A[idx, idx - dm_m] = 2 / (dy**2)  # Coefficient of u(i,j-1)
-            #         A[idx, idx + dm_p] = 0            # Coefficient of u(i,j+1)
+            # # Don't think this is the correct way of imposing boundary conditions...
+            # # if is_land(lats_nuhf[j-1], lons_nuhf[i]):
+            # #     A[idx, idx - 1] = 0            # Coefficient of u(i,j-1)
+            # #
+            # # if is_land(lats_nuhf[j+1], lons_nuhf[i]):
+            # #     A[idx, idx + 1] = 0            # Coefficient of u(i,j+1)
+            # #
+            # # if is_land(lats_nuhf[j], lons_nuhf[im1]):
+            # #     A[idx, idx - dm_m] = 0              # Coefficient of u(i-1,j)
+            # #
+            # # if is_land(lats_nuhf[j], lons_nuhf[ip1]):
+            # #     A[idx, idx + dm_p] = 0              # Coefficient of u(i+1,j)
             #
-            #     if is_land(lats_nuhf[j], lons_nuhf[im1]):
-            #         A[idx, idx - 1] = 0              # Coefficient of u(i-1,j)
-            #         A[idx, idx + 1] = 2 / (dx_j**2)  # Coefficient of u(i+1,j)
+            # f[idx] = -(dx_j ** 2 * dy ** 2) * net_upward_heat_flux[j, i]
             #
-            #     if is_land(lats_nuhf[j], lons_nuhf[ip1]):
-            #         A[idx, idx - 1] = 2 / (dx_j**2)  # Coefficient of u(i-1,j)
-            #         A[idx, idx + 1] = 0              # Coefficient of u(i+1,j)
-
-            # Don't think this is the correct way of imposing boundary conditions...
-            # if is_land(lats_nuhf[j-1], lons_nuhf[i]):
-            #     A[idx, idx - 1] = 0            # Coefficient of u(i,j-1)
-            #
-            # if is_land(lats_nuhf[j+1], lons_nuhf[i]):
-            #     A[idx, idx + 1] = 0            # Coefficient of u(i,j+1)
-            #
-            # if is_land(lats_nuhf[j], lons_nuhf[im1]):
-            #     A[idx, idx - dm_m] = 0              # Coefficient of u(i-1,j)
-            #
-            # if is_land(lats_nuhf[j], lons_nuhf[ip1]):
-            #     A[idx, idx + dm_p] = 0              # Coefficient of u(i+1,j)
-            #
-            # if np.abs(lats_nuhf[j]) > 80:
-            #     # Set the source term to zero in the polar regions.
-            #     f[idx] = 0
-            #     net_upward_heat_flux[j, i] = 0
-            # else:
-            #     f[idx] = -(dx_j**2 * dy**2) * net_upward_heat_flux[j, i]
+            # # if np.abs(lats_nuhf[j]) > 80:
+            # #     # Set the source term to zero in the polar regions.
+            # #     f[idx] = 0
+            # #     net_upward_heat_flux[j, i] = 0
+            # # else:
+            # #     f[idx] = -(dx_j ** 2 * dy ** 2) * net_upward_heat_flux[j, i]
 
             """ Finite volume scheme """
             # Some shorthand notation:
@@ -446,13 +458,13 @@ def solve_for_ocean_heat_transport_potential_cartesian():
             #     dx_i_jp12 = 0
             #     # dy_ip12_j = 0
             #
-            # if is_land(lats_nuhf[j], lons_nuhf[im1]):
-            #     dy_im12_j = 0
-            #     # dx_i_jm12 = 0
-            #
-            # if is_land(lats_nuhf[j], lons_nuhf[ip1]):
-            #     dy_ip12_j = 0
-            #     # dx_i_jp12 = 0
+            if is_land(lats_nuhf[j], lons_nuhf[im1]):
+                dy_im12_j = 0
+                # dx_i_jm12 = 0
+
+            if is_land(lats_nuhf[j], lons_nuhf[ip1]):
+                dy_ip12_j = 0
+                # dx_i_jp12 = 0
 
             if j == idx_southmost[i]:
                 # Setting phi(i,0) = phi(i,1) at southern boundary
