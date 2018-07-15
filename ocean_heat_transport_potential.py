@@ -504,7 +504,7 @@ def solve_for_ocean_heat_transport_potential_cartesian():
     # We try using two iterative solvers for sparse nonsymmetric linear systems, the
     # BIConjugate Gradient STABilized iteration (bicgstab) and the Generalized Minimal RESidual iteration (GMRES).
     # u_no_land, _ = sparse_linalg.bicgstab(A, f, M=P, tol=0.01, callback=report)
-    u_no_land, _ = sparse_linalg.gmres(A, f, M=P, tol=0.018, callback=report)
+    u_no_land, _ = sparse_linalg.gmres(A, f, M=P, tol=2e-4, callback=report)
 
     # The potential is unique up to a constant, so we pick the "gauge" or normalization that it must integrate to zero.
     logger.info('Before normalization: sum(u_no_land)={:f}, mean(u_no_land)={:f}'
@@ -515,14 +515,14 @@ def solve_for_ocean_heat_transport_potential_cartesian():
     logger.info('Before normalization: sum(u_no_land)={:f}, mean(u_no_land)={:f}'
                 .format(np.sum(u_no_land), np.mean(np.mean(u_no_land))))
 
-    # Add the land cells back in.
+    # Add the land cells back in as NaN.
     u = np.zeros((m*n, 1))
     n_land_cells = 0
     for j in np.arange(n):
         for i in np.arange(m):
             lat, lon = lats_nuhf[j], lons_nuhf[i]
             if is_land(lat, lon):
-                u[j*m + i] = 0
+                u[j*m + i] = np.nan
                 n_land_cells = n_land_cells + 1
             else:
                 u[j*m + i] = u_no_land[j*m + i - n_land_cells]
@@ -565,7 +565,8 @@ def solve_for_ocean_heat_transport_potential_cartesian():
             if is_land(lats_nuhf[j], lons_nuhf[i]) \
                     or is_land(lats_nuhf[j-1], lons_nuhf[i]) or is_land(lats_nuhf[j+1], lons_nuhf[i]) \
                     or is_land(lats_nuhf[j], lons_nuhf[im1]) or is_land(lats_nuhf[j], lons_nuhf[ip1]):
-                continue
+                phi_x[j, i] = np.nan
+                phi_y[j, i] = np.nan
             else:
                 phi_x[j, i] = (phi[j, ip1] - phi[j, im1]) / (2*dx_j)
                 phi_y[j, i] = (phi[j+1, i] - phi[j-1, i]) / (2*dy)
@@ -582,13 +583,20 @@ def solve_for_ocean_heat_transport_potential_cartesian():
     phi_x, lons_cyclic = cartopy.util.add_cyclic_point(phi_x, coord=lons_nuhf)
     phi_y, lons_cyclic = cartopy.util.add_cyclic_point(phi_y, coord=lons_nuhf)
 
+    land_mask = np.ones(phi_x.shape, dtype=bool)
+    for j in np.arange(n):
+        for i in np.arange(m):
+            lat, lon = lats_nuhf[j], lons_nuhf[i]
+            if not is_land(lat, lon):
+                land_mask[j, i] = False
+
     fig = plt.figure(figsize=(16, 9))
     matplotlib.rcParams.update({'font.size': 10})
 
     # Plot ocean heat potential phi_o.
     ax = plt.subplot(111, projection=ccrs.PlateCarree(central_longitude=180))
-    # ax.add_feature(land_50m)
-    # ax.add_feature(ice_50m)
+    ax.add_feature(land_50m)
+    ax.add_feature(ice_50m)
     ax.set_extent([-180, 180, -90, 90], ccrs.PlateCarree(central_longitude=180))
 
     # gl = ax.gridlines(crs=ccrs.PlateCarree(central_longitude=180), draw_labels=True,
@@ -608,7 +616,18 @@ def solve_for_ocean_heat_transport_potential_cartesian():
     ax.xaxis.set_major_formatter(lon_formatter)
     ax.yaxis.set_major_formatter(lat_formatter)
 
-    im = ax.contourf(lons_cyclic, lats_nuhf, phi / 1e15, 50, transform=vector_crs, cmap='PuOr')
+    im = ax.contourf(lons_cyclic, lats_nuhf, phi / 1e15, 25, transform=vector_crs, cmap=cmocean.cm.matter)
+
+    ax.contour(lons_cyclic, lats_nuhf, np.ma.array(phi_x, mask=np.isnan(phi_x)), levels=[0],
+               colors='blue', linewidths=2, transform=vector_crs)
+    ax.contour(lons_cyclic, lats_nuhf, np.ma.array(phi_y, mask=np.isnan(phi_y)), levels=[0],
+               colors='black', linewidths=2, transform=vector_crs)
+
+    EFE_patch = mpatches.Patch(color='black', label=r'energy flux equator (EFE), $v_h=0$ ')
+    EFPM_patch = mpatches.Patch(color='blue', label=r'energy flux prime meridian (EFPM), $u_h=0$')
+
+    plt.legend(handles=[EFE_patch, EFPM_patch], loc='lower center',
+               bbox_to_anchor=(0, -0.2, 1, -0.2), ncol=1, mode='expand', borderaxespad=0, frameon=False)
 
     # m = plt.cm.ScalarMappable(cmap=cm.get_cmap('PuOr', 15))
     # m.set_array(phi)
@@ -631,8 +650,8 @@ def solve_for_ocean_heat_transport_potential_cartesian():
 
     # Plot zonal heat transport.
     ax = plt.subplot(111, projection=ccrs.PlateCarree(central_longitude=180))
-    # ax.add_feature(land_50m)
-    # ax.add_feature(ice_50m)
+    ax.add_feature(land_50m)
+    ax.add_feature(ice_50m)
     ax.set_extent([-180, 180, -90, 90], ccrs.PlateCarree(central_longitude=180))
 
     # gl = ax.gridlines(crs=ccrs.PlateCarree(central_longitude=180), draw_labels=True,
@@ -658,10 +677,23 @@ def solve_for_ocean_heat_transport_potential_cartesian():
     # im = ax.pcolormesh(lons_cyclic, lats_nuhf, phi_x / 1e8, transform=vector_crs,
     #                    cmap=cmocean.cm.balance, vmin=-1, vmax=1)
 
-    Q = ax.quiver(lons_cyclic[::3], lats_nuhf[::3], phi_x[::3, ::3] / 1e8, phi_y[::3, ::3] / 1e8,
+    Q = ax.quiver(lons_cyclic[::3], lats_nuhf[::3],
+                  np.ma.array(phi_x / 1e8, mask=np.isnan(phi_x))[::3, ::3],
+                  np.ma.array(phi_y / 1e8, mask=np.isnan(phi_y))[::3, ::3],
                   pivot='middle', transform=vector_crs, units='width', width=0.002)
     plt.quiverkey(Q, 0.70, 0.88, 1, r'$10^8$ W/m ', labelpos='E', coordinates='figure',
                   fontproperties={'size': 11}, transform=ax.transAxes)
+
+    ax.contour(lons_cyclic, lats_nuhf, np.ma.array(phi_x, mask=np.isnan(phi_x)), levels=[0],
+               colors='blue', linewidths=2, transform=vector_crs)
+    ax.contour(lons_cyclic, lats_nuhf, np.ma.array(phi_y, mask=np.isnan(phi_y)), levels=[0],
+               colors='black', linewidths=2, transform=vector_crs)
+
+    EFE_patch = mpatches.Patch(color='black', label=r'energy flux equator (EFE), $v_h=0$ ')
+    EFPM_patch = mpatches.Patch(color='blue', label=r'energy flux prime meridian (EFPM), $u_h=0$')
+
+    plt.legend(handles=[EFE_patch, EFPM_patch], loc='lower center',
+               bbox_to_anchor=(0, -0.2, 1, -0.2), ncol=1, mode='expand', borderaxespad=0, frameon=False)
 
     # ax.streamplot(lons_cyclic, lats_nuhf, phi_x, phi_y, color='black', linewidth=2, density=5, transform=vector_crs)
 
